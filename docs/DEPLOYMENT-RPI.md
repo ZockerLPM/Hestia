@@ -872,6 +872,45 @@ sudo systemctl edit hestia-kiosk
 sudo systemctl restart hestia-kiosk
 ```
 
+#### Mauszeiger ausblenden
+
+Im Wand-Modus stört ein sichtbarer Mauszeiger. Hestia versteckt ihn auf
+der `/wall`-Seite per CSS (`html.wall-no-cursor`) automatisch. Für eine
+saubere, systemweite Lösung (auch beim Boot vor App-Start, auf Error-
+Pages, mit USB-Maus dran) zusätzlich einen leeren XCursor-Theme anlegen:
+
+```bash
+sudo apt install -y imagemagick xcursorgen
+
+cd /tmp
+convert -size 1x1 xc:transparent blank.png
+echo "1 0 0 blank.png" > blank.cfg
+xcursorgen blank.cfg blank-cursor
+
+sudo mkdir -p /usr/share/icons/blank/cursors
+sudo cp blank-cursor /usr/share/icons/blank/cursors/default
+for c in left_ptr text crosshair pointer hand grab grabbing watch progress \
+         help context-menu not-allowed wait xterm arrow; do
+  sudo ln -sf default /usr/share/icons/blank/cursors/$c
+done
+
+sudo tee /usr/share/icons/blank/index.theme > /dev/null <<'EOF'
+[Icon Theme]
+Name=blank
+Inherits=core
+EOF
+
+# In der Service-Unit nachziehen
+sudo systemctl edit hestia-kiosk
+# Block einfügen:
+#   [Service]
+#   Environment=XCURSOR_THEME=blank
+#   Environment=XCURSOR_SIZE=1
+
+sudo systemctl daemon-reload
+sudo systemctl restart hestia-kiosk
+```
+
 #### Auto-Login auf der Wand
 
 Das Wand-Display soll natürlich nicht jedes Mal ein Login-Formular zeigen,

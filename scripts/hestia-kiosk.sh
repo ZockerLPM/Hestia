@@ -9,11 +9,14 @@ URL="${HESTIA_WALL_URL:-https://hestia.local/wall}"
 # (üblicherweise via EnvironmentFile= in der systemd-Unit), einen frischen
 # JWT holen und an die URL als #token=... anhängen. main.tsx im Frontend
 # liest den Hash, schreibt ihn in localStorage und säubert die URL.
-# Schlägt der Login fehl (Backend nicht erreichbar, falsche Credentials),
-# läuft der Kiosk trotzdem weiter — dann zeigt er halt /login.
-if [[ -n "${HESTIA_KIOSK_EMAIL:-}" && -n "${HESTIA_KIOSK_PASSWORD:-}" ]]; then
-  LOGIN_SCRIPT="$(dirname "$0")/hestia-kiosk-login.sh"
-  if TOKEN=$("$LOGIN_SCRIPT" 2>/tmp/hestia-kiosk-login.log); then
+# Schlägt der Login fehl (Skript fehlt/nicht executable, Backend down,
+# falsche Credentials), läuft der Kiosk trotzdem weiter — dann zeigt
+# er halt /login. NICHT den ganzen Kiosk darüber killen.
+LOGIN_SCRIPT="$(dirname "$0")/hestia-kiosk-login.sh"
+if [[ -n "${HESTIA_KIOSK_EMAIL:-}" && -n "${HESTIA_KIOSK_PASSWORD:-}" && -x "${LOGIN_SCRIPT}" ]]; then
+  # || true verhindert, dass `set -e` uns killt
+  TOKEN=$("${LOGIN_SCRIPT}" 2>/tmp/hestia-kiosk-login.log || true)
+  if [[ -n "${TOKEN}" ]]; then
     URL="${URL}#token=${TOKEN}"
   fi
 fi
@@ -30,6 +33,14 @@ if [[ -f "${PREFS}" ]]; then
   sed -i 's/"exited_cleanly":false/"exited_cleanly":true/' "${PREFS}" || true
 fi
 
+# Skalierung — niedriger Wert = UI wird kleiner / mehr Inhalt sichtbar.
+# Default 1.0 passt für 1080p+. Für kleine Displays anpassen:
+#   800x480  → 0.6   (offizielles RPi Touch Display Gen 1)
+#   1024x600 → 0.7   (häufige Drittanbieter)
+#   1280x720 → 0.85
+#   1920x1080 → 1.0
+SCALE="${HESTIA_KIOSK_SCALE:-1.0}"
+
 exec chromium \
   --kiosk \
   --noerrdialogs \
@@ -43,4 +54,5 @@ exec chromium \
   --disk-cache-size=50000000 \
   --user-data-dir="${PROFILE_DIR}" \
   --ozone-platform=wayland \
+  --force-device-scale-factor="${SCALE}" \
   "${URL}"

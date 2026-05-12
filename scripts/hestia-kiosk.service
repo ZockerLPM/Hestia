@@ -5,7 +5,18 @@ Wants=network-online.target
 
 [Service]
 Type=simple
+
+# !!! ANPASSEN !!!
+# User= MUSS der Benutzer sein, den du beim RPi-OS-Imager angegeben hast.
+# Im offiziellen RPi-Imager-Default ist es 'pi', viele wählen einen anderen
+# Namen (z.B. via "OS-Anpassung → Benutzername"). Stimmt der Wert hier nicht
+# mit einem echten /etc/passwd-Eintrag überein, scheitert systemd beim Start
+# mit `status=217/USER`. Entweder direkt hier editieren ODER per Override:
+#   sudo systemctl edit hestia-kiosk
+#   [Service]
+#   User=<dein-username>
 User=pi
+
 PAMName=login
 TTYPath=/dev/tty1
 StandardInput=tty

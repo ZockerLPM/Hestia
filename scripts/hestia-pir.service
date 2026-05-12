@@ -5,7 +5,11 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-# Pfade ggf. anpassen; %h ist das HOME des Users unten.
+
+# !!! ANPASSEN !!!
+# User= muss mit deinem echten Username im /etc/passwd übereinstimmen,
+# sonst exit 217/USER. Default 'pi' aus dem alten RPi-OS-Imager — viele
+# Systeme verwenden heute einen eigenen Namen.
 User=pi
 WorkingDirectory=%h/hestia
 ExecStart=/usr/bin/python3 %h/hestia/scripts/pir-motion.py
