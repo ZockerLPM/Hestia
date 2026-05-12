@@ -1,0 +1,211 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(cuid())
+  name         String
+  email        String   @unique
+  passwordHash String
+  color        String   @default("#6366f1")
+  createdAt    DateTime @default(now())
+
+  financeEntries FinanceEntry[]
+  addedItems     ShoppingItem[] @relation("AddedBy")
+  checkedItems   ShoppingItem[] @relation("CheckedBy")
+  tasksCreated   Task[]         @relation("TaskCreator")
+  tasksAssigned  Task[]         @relation("TaskAssignee")
+  calendarEvents CalendarEvent[]
+}
+
+model FinanceCategory {
+  id           String  @id @default(cuid())
+  name         String
+  icon         String  @default("💰")
+  color        String  @default("#6366f1")
+  type         String  // "income" | "expense" | "both"
+  monthlyBudget Float? // null = kein Limit
+
+  entries FinanceEntry[]
+}
+
+model RecurringFinance {
+  id          String   @id @default(cuid())
+  type        String   // "income" | "expense"
+  amount      Float
+  description String
+  categoryId  String
+  userId      String
+  interval    String   // "monthly" | "weekly" | "yearly"
+  dayOfMonth  Int?     // 1-28 für monthly/yearly
+  startDate   DateTime
+  endDate     DateTime?
+  active      Boolean  @default(true)
+  lastRunAt   DateTime?
+  nextRunAt   DateTime
+  autoCreate  Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model FinanceEntry {
+  id          String          @id @default(cuid())
+  type        String          // "income" | "expense"
+  amount      Float
+  description String
+  date        DateTime
+  categoryId  String
+  userId      String
+  createdAt   DateTime        @default(now())
+
+  category FinanceCategory @relation(fields: [categoryId], references: [id])
+  user     User            @relation(fields: [userId], references: [id])
+}
+
+model ShoppingList {
+  id        String         @id @default(cuid())
+  name      String
+  isDefault Boolean        @default(false)
+  createdAt DateTime       @default(now())
+
+  items ShoppingItem[]
+}
+
+model ShoppingItem {
+  id          String       @id @default(cuid())
+  listId      String
+  name        String
+  quantity    Float        @default(1)
+  unit        String       @default("Stück")
+  checked     Boolean      @default(false)
+  barcode     String?
+  category    String?
+  note        String?
+  addedById   String?
+  checkedById String?
+  checkedAt   DateTime?
+  createdAt   DateTime     @default(now())
+
+  list      ShoppingList @relation(fields: [listId], references: [id], onDelete: Cascade)
+  addedBy   User?        @relation("AddedBy", fields: [addedById], references: [id])
+  checkedBy User?        @relation("CheckedBy", fields: [checkedById], references: [id])
+}
+
+model PantryItem {
+  id          String    @id @default(cuid())
+  name        String
+  quantity    Float
+  unit        String    @default("Stück")
+  barcode     String?
+  expiryDate  DateTime?
+  category    String?
+  location    String?
+  minQuantity Float?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  ingredients RecipeIngredient[]
+}
+
+model Recipe {
+  id           String   @id @default(cuid())
+  title        String
+  description  String?
+  instructions String?
+  servings     Int      @default(2)
+  prepMinutes  Int?
+  imageUrl     String?
+  tags         String?
+  createdById  String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  ingredients RecipeIngredient[]
+  mealPlans   MealPlan[]
+}
+
+model MealPlan {
+  id        String   @id @default(cuid())
+  date      DateTime
+  mealType  String   // "breakfast" | "lunch" | "dinner" | "snack"
+  recipeId  String?
+  customTitle String?
+  servings  Int      @default(2)
+  cooked    Boolean  @default(false)
+  cookedAt  DateTime?
+  notes     String?
+  createdAt DateTime @default(now())
+
+  recipe Recipe? @relation(fields: [recipeId], references: [id], onDelete: SetNull)
+}
+
+model RecipeIngredient {
+  id           String  @id @default(cuid())
+  recipeId     String
+  name         String
+  quantity     Float
+  unit         String  @default("Stück")
+  pantryItemId String?
+  order        Int     @default(0)
+
+  recipe     Recipe      @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+  pantryItem PantryItem? @relation(fields: [pantryItemId], references: [id], onDelete: SetNull)
+}
+
+model TaskTemplate {
+  id            String   @id @default(cuid())
+  title         String
+  description   String?
+  priority      String   @default("medium")
+  assignedToId  String?
+  defaultDueInDays Int?
+  createdAt     DateTime @default(now())
+}
+
+model Task {
+  id           String    @id @default(cuid())
+  title        String
+  description  String?
+  completed    Boolean   @default(false)
+  priority     String    @default("medium")
+  dueDate      DateTime?
+  recurring    String?
+  assignedToId String?
+  createdById  String?
+  completedAt  DateTime?
+  createdAt    DateTime  @default(now())
+
+  assignedTo User? @relation("TaskAssignee", fields: [assignedToId], references: [id])
+  createdBy  User? @relation("TaskCreator", fields: [createdById], references: [id])
+}
+
+model CalendarEvent {
+  id              String    @id @default(cuid())
+  title           String
+  description     String?
+  startDate       DateTime
+  endDate         DateTime
+  allDay          Boolean   @default(false)
+  color           String    @default("#6366f1")
+  recurrence      String?   // "daily" | "weekly" | "monthly" | "yearly"
+  recurrenceUntil DateTime?
+  createdById     String?
+  createdAt       DateTime  @default(now())
+
+  createdBy User? @relation(fields: [createdById], references: [id])
+}
+
+model PushSubscription {
+  id        String   @id @default(cuid())
+  userId    String
+  endpoint  String   @unique
+  p256dh    String
+  authKey   String
+  userAgent String?
+  createdAt DateTime @default(now())
+}

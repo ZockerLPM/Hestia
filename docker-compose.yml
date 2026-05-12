@@ -1,0 +1,23 @@
+services:
+  backend:
+    build: ./backend
+    ports:
+      - "3001:3001"
+    volumes:
+      - hestia-data:/app/data
+    environment:
+      - DATABASE_URL=file:/app/data/hestia.db
+      - JWT_SECRET=${JWT_SECRET:-hestia-secret-change-in-production}
+      - NODE_ENV=production
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  hestia-data:

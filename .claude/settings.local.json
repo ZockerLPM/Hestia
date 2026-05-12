@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls /home/user/Hestia/frontend/src/pages/ 2>/dev/null || echo \"not found\")",
+      "Read(//home/user/Hestia/frontend/src/**)",
+      "PowerShell(Get-ChildItem \"s:\\\\Programmieren\\\\Hestia\" -Recurse | Where-Object { -not $_.PSIsContainer } | Select-Object -ExpandProperty FullName)",
+      "PowerShell(npm install --prefix s:\\\\Programmieren\\\\Hestia\\\\frontend react-hot-toast)",
+      "PowerShell(npm install --prefix s:\\\\Programmieren\\\\Hestia\\\\backend web-push @types/web-push)",
+      "PowerShell(npm --prefix s:\\\\Programmieren\\\\Hestia\\\\frontend run build)",
+      "PowerShell(npm install --prefix s:\\\\Programmieren\\\\Hestia\\\\frontend tesseract.js)",
+      "PowerShell(npm --prefix s:\\\\Programmieren\\\\Hestia\\\\backend run db:push)",
+      "PowerShell(npm --prefix s:\\\\Programmieren\\\\Hestia\\\\backend run build)"
+    ]
+  }
+}
