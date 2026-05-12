@@ -1,4 +1,4 @@
-import { Outlet } from 'react-router-dom';
+import { Outlet, Link } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import BottomTabBar from './BottomTabBar';
 import { useRealtimeSync } from '../hooks/useRealtimeSync';
@@ -28,12 +28,14 @@ export default function Layout() {
             <ThemeToggle compact />
             {user && (
               <>
-                <div
+                <Link
+                  to="/profile"
                   className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-white"
                   style={{ backgroundColor: user.color }}
+                  aria-label="Profil"
                 >
                   {user.name.charAt(0).toUpperCase()}
-                </div>
+                </Link>
                 <button
                   onClick={logout}
                   className="p-1.5 text-gray-400 hover:text-gray-700"

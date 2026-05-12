@@ -12,6 +12,8 @@ export default defineConfig({
       filename: 'sw.ts',
       injectManifest: {
         globPatterns: ['**/*.{js,css,html,svg,png,ico,woff2}'],
+        globIgnores: ['models/**'],
+        maximumFileSizeToCacheInBytes: 8 * 1024 * 1024,
       },
       includeAssets: ['favicon.ico', 'icons/apple-touch-icon.png'],
       manifest: {
@@ -83,6 +85,7 @@ export default defineConfig({
           'icons': ['lucide-react'],
           'scanner': ['@zxing/browser', '@zxing/library'],
           'ocr': ['tesseract.js'],
+          'faceapi': ['@vladmandic/face-api'],
         },
       },
     },

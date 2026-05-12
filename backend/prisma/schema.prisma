@@ -15,12 +15,51 @@ model User {
   color        String   @default("#6366f1")
   createdAt    DateTime @default(now())
 
-  financeEntries FinanceEntry[]
-  addedItems     ShoppingItem[] @relation("AddedBy")
-  checkedItems   ShoppingItem[] @relation("CheckedBy")
-  tasksCreated   Task[]         @relation("TaskCreator")
-  tasksAssigned  Task[]         @relation("TaskAssignee")
-  calendarEvents CalendarEvent[]
+  // Personalisierung
+  homeLat       Float?
+  homeLng       Float?
+  homeLabel     String?
+  workLat       Float?
+  workLng       Float?
+  workLabel     String?
+  commuteMode   String?  // "transit" | "driving" | "biking" | "walking"
+  weatherLat    Float?
+  weatherLng    Float?
+
+  financeEntries  FinanceEntry[]
+  addedItems      ShoppingItem[] @relation("AddedBy")
+  checkedItems    ShoppingItem[] @relation("CheckedBy")
+  tasksCreated    Task[]         @relation("TaskCreator")
+  tasksAssigned   Task[]         @relation("TaskAssignee")
+  calendarEvents  CalendarEvent[]
+  faceDescriptors FaceDescriptor[]
+  workShifts      WorkShift[]
+  shiftPatterns   ShiftPattern[]
+  moodLogs        MoodLog[]
+  wallConfig      WallConfig?
+}
+
+model FaceDescriptor {
+  id         String   @id @default(cuid())
+  userId     String
+  descriptor String   // JSON-Array von Float32 (128 Werte aus face-api.js)
+  label      String?  // optional, z.B. "Brille", "Sommer"
+  createdAt  DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model WorkShift {
+  id        String   @id @default(cuid())
+  userId    String
+  startsAt  DateTime
+  endsAt    DateTime
+  note      String?
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, startsAt])
 }
 
 model FinanceCategory {
@@ -208,4 +247,44 @@ model PushSubscription {
   authKey   String
   userAgent String?
   createdAt DateTime @default(now())
+}
+
+// Wiederkehrende Schichtmuster (z.B. jeden Montag 08:00–17:00)
+model ShiftPattern {
+  id         String    @id @default(cuid())
+  userId     String
+  weekday    Int       // 0=Mo, 1=Di, ..., 6=So
+  startsAt   String    // "HH:MM"
+  endsAt     String    // "HH:MM"
+  validFrom  DateTime
+  validUntil DateTime?
+  note       String?
+  createdAt  DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, weekday])
+}
+
+// Mood-Check-in beim Wall-Login
+model MoodLog {
+  id        String   @id @default(cuid())
+  userId    String
+  mood      Int      // 1–5 (1=😞 .. 5=😄)
+  note      String?
+  loggedAt  DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, loggedAt])
+}
+
+// Pro-User Konfiguration des Wall-Dashboards
+model WallConfig {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  config    String   // JSON: { cards: [{id, enabled, order, wide}], bgColor?, showSeconds? }
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }

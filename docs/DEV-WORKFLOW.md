@@ -26,6 +26,7 @@ npm run db:seed
 # Frontend
 cd ..\frontend
 npm install
+npm run face:models    # einmalig: face-api.js-Modelle nach public/models/
 ```
 
 ### Standard-Dev-Loop (2 Terminals)
@@ -103,6 +104,7 @@ Optional Domain in Klammern: `feat(shopping): Pin-Default-Liste`.
 | `npm run build` | Production-Build (beide) |
 | `npm run push:keys` (backend) | VAPID-Keys generieren |
 | `npm run icons` (frontend) | PNG-Icons aus `source.svg` |
+| `npm run face:models` (frontend) | face-api.js-Modelle nach `public/models/` |
 | `npm run db:push` (backend) | Schema → DB |
 | `npm run db:generate` (backend) | Prisma Client neu generieren |
 | `npm run db:seed` (backend) | Demo-Daten einspielen |

@@ -18,6 +18,12 @@ import recipeRoutes from './routes/recipes';
 import statsRoutes from './routes/stats';
 import suggestionsRoutes from './routes/suggestions';
 import mealPlanRoutes from './routes/mealPlan';
+import profileRoutes from './routes/profile';
+import shiftsRoutes from './routes/shifts';
+import externalRoutes from './routes/external';
+import wallRoutes from './routes/wall';
+import moodRoutes from './routes/mood';
+import motionRoutes from './routes/motion';
 
 export const prisma = new PrismaClient();
 
@@ -46,6 +52,12 @@ app.use('/api/recipes', recipeRoutes);
 app.use('/api/stats', statsRoutes);
 app.use('/api/suggestions', suggestionsRoutes);
 app.use('/api/meal-plan', mealPlanRoutes);
+app.use('/api/profile', profileRoutes);
+app.use('/api/shifts', shiftsRoutes);
+app.use('/api/external', externalRoutes);
+app.use('/api/wall', wallRoutes);
+app.use('/api/mood', moodRoutes);
+app.use('/api/internal/motion', motionRoutes);
 
 io.on('connection', (socket) => {
   socket.on('join-household', () => socket.join('household'));
@@ -72,6 +84,13 @@ httpServer.listen(PORT, async () => {
       if (created > 0) console.log(`[cron] Created ${created} recurring finance entr${created === 1 ? 'y' : 'ies'}`);
     } catch (err) {
       console.error('[cron] recurring finance failed:', err);
+    }
+    try {
+      const { generateShiftsFromPatterns } = await import('./routes/shifts');
+      const shiftCreated = await generateShiftsFromPatterns(14);
+      if (shiftCreated > 0) console.log(`[cron] Generated ${shiftCreated} shift(s) from patterns`);
+    } catch (err) {
+      console.error('[cron] shift pattern generation failed:', err);
     }
   });
 
@@ -115,4 +134,10 @@ httpServer.listen(PORT, async () => {
   backfillOverdueRecurring()
     .then((n) => n > 0 && console.log(`[startup] Backfilled ${n} recurring task(s)`))
     .catch((err) => console.error('[startup] recurring backfill failed:', err));
+
+  import('./routes/shifts').then(({ generateShiftsFromPatterns }) =>
+    generateShiftsFromPatterns(14)
+      .then((n) => n > 0 && console.log(`[startup] Generated ${n} shift(s) from patterns`))
+      .catch((err) => console.error('[startup] shift pattern generation failed:', err))
+  );
 });

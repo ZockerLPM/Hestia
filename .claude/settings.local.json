@@ -9,7 +9,12 @@
       "PowerShell(npm --prefix s:\\\\Programmieren\\\\Hestia\\\\frontend run build)",
       "PowerShell(npm install --prefix s:\\\\Programmieren\\\\Hestia\\\\frontend tesseract.js)",
       "PowerShell(npm --prefix s:\\\\Programmieren\\\\Hestia\\\\backend run db:push)",
-      "PowerShell(npm --prefix s:\\\\Programmieren\\\\Hestia\\\\backend run build)"
+      "PowerShell(npm --prefix s:\\\\Programmieren\\\\Hestia\\\\backend run build)",
+      "PowerShell(npm install --prefix s:\\\\Programmieren\\\\Hestia\\\\frontend @vladmandic/face-api)",
+      "PowerShell(npm --prefix s:\\\\Programmieren\\\\Hestia\\\\backend run db:generate)",
+      "Bash(npx prisma *)",
+      "Bash(npx tsc *)",
+      "Bash(npx vite *)"
     ]
   }
 }

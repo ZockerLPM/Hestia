@@ -36,13 +36,45 @@ Hestia hat **zwei UI-Modi** für unterschiedliche Geräte/Use-Cases:
 | Modus | Route | Zielgerät | Typische Aktionen |
 |-------|-------|-----------|-------------------|
 | **App-Modus** | `/` (mit Sidebar/BottomBar) | Desktop, Smartphone, Tablet | Vollständige CRUD aller Daten |
-| **Wand-Modus** | `/wall` (eigenständig, Vollbild dunkel) | Wandtablet im Hausflur/Küche | Häufige Quick-Aktionen direkt erledigen: Tasks abhaken, Einkaufsliste verwalten, Mahlzeiten als gekocht markieren, **Einkauf in Vorrat übernehmen** (eigener Vollbild-Sammelmodus mit USB-Scanner/Kamera/MHD-Räder) |
+| **Wand-Modus** | `/wall` (eigenständig, Vollbild dunkel) | Wandtablet im Hausflur/Küche | Häufige Quick-Aktionen direkt erledigen: Tasks abhaken, Einkaufsliste verwalten, Mahlzeiten als gekocht markieren, **Einkauf in Vorrat übernehmen** (eigener Vollbild-Sammelmodus mit USB-Scanner/Kamera/MHD-Räder). Optional **Gesichtserkennung** für personalisierte Inhalte (Wetter, ÖV/Stau, Schichten) |
 
 Die Wand ist bewusst **nicht** eine reine Dashboard-Anzeige mit
 Quick-Links zur App — die häufigsten Eingaben sind direkt im Wand-Modus
 möglich, ohne Modul-Wechsel. Edits mit komplexen Datumsfeldern (Termine,
 recurring Tasks) bleiben in der App, da Touch-Datepicker ineffizient
 sind.
+
+### Wand-Personalisierung (optional)
+
+Bei aktiver Erkennung läuft auf der Wand-Page eine niederfrequente
+Face-Detection (alle 2 s ein Frame, `tiny_face_detector` + 128-Float-
+Embedding via `@vladmandic/face-api`). Wird ein registriertes Gesicht
+erkannt, blendet die Wand ein zusätzliches `<PersonalPanel>` ein mit
+Wetter (Open-Meteo), nächster ÖV-Verbindung oder Verkehrslage (je nach
+`commuteMode`) und der nächsten Arbeitsschicht.
+
+Datenfluss:
+```
+RPi-Kameramodul → Browser (getUserMedia) → face-api.js
+                                              │
+                                              ▼
+                              GET /api/profile/face-descriptors
+                                              │
+                              FaceMatcher.findBestMatch
+                                              │
+                                              ▼
+                          recognizedUser → PersonalPanel
+                                              │
+                              ┌───────────────┼──────────────┐
+                              ▼               ▼              ▼
+                       /api/external    /api/external   /api/shifts
+                           /weather        /transit
+                                          oder /traffic
+```
+
+Privacy: Alle Embeddings + Bilder bleiben lokal (RPi). Externe Calls
+(Open-Meteo, transport.opendata.ch, TomTom) gehen nur an die Provider,
+nicht an Dritte.
 
 ## Komponenten-Verantwortlichkeiten
 

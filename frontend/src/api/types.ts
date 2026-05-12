@@ -5,6 +5,34 @@ export interface User {
   color: string;
 }
 
+export interface UserProfile extends User {
+  homeLat: number | null;
+  homeLng: number | null;
+  homeLabel: string | null;
+  workLat: number | null;
+  workLng: number | null;
+  workLabel: string | null;
+  commuteMode: 'transit' | 'driving' | 'biking' | 'walking' | null;
+  weatherLat: number | null;
+  weatherLng: number | null;
+}
+
+export interface FaceDescriptorEntry {
+  id: string;
+  userId: string;
+  user: Pick<User, 'id' | 'name' | 'color'>;
+  descriptor: number[];
+  label: string | null;
+}
+
+export interface WorkShift {
+  id: string;
+  userId: string;
+  startsAt: string;
+  endsAt: string;
+  note: string | null;
+}
+
 export interface FinanceCategory {
   id: string;
   name: string;

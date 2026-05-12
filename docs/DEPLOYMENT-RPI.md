@@ -150,6 +150,7 @@ services:
       - VAPID_PUBLIC_KEY=${VAPID_PUBLIC_KEY}
       - VAPID_PRIVATE_KEY=${VAPID_PRIVATE_KEY}
       - VAPID_SUBJECT=${VAPID_SUBJECT}
+      - TOMTOM_API_KEY=${TOMTOM_API_KEY:-}
       - NODE_ENV=production
       - TZ=Europe/Berlin
     volumes:
@@ -204,6 +205,44 @@ Wenn nicht vorhanden, am Ende des Dockerfile sicherstellen:
 CMD npx prisma db push --skip-generate && node dist/index.js
 ```
 
+## Schritt 6b — Face-Modelle herunterladen (optional, für Wand-Erkennung)
+
+Wenn du die Gesichtserkennung im Wand-Modus nutzen willst, müssen die
+face-api.js-Modelle einmalig nach `frontend/public/models/` geladen
+werden — sie werden ins Frontend-Image gebacken.
+
+```bash
+cd ~/hestia/frontend
+npm install --no-save  # nur falls noch nicht geschehen
+npm run face:models
+```
+
+Resultat: 4 Dateien (~7 MB total) in `frontend/public/models/`. Beim
+nächsten `docker compose build` landen sie automatisch im Nginx-Image
+und werden über `https://hestia.local/models/*` ausgeliefert.
+
+## Schritt 6c — RPi-Kameramodul aktivieren (für Wand-Erkennung)
+
+Wenn der RPi sowohl Server als auch Wand-Display ist und du das
+Kameramodul nutzen willst:
+
+```bash
+sudo raspi-config
+# Interface Options → Camera → Enable → reboot
+```
+
+Auf RPi OS Bookworm (64-bit) läuft die Kamera über **libcamera** und ist
+direkt als `/dev/video0` (V4L2) für Chromium verfügbar. Test:
+
+```bash
+libcamera-hello --timeout 2000     # Vorschau-Fenster, sollte Bild zeigen
+ls /dev/video*                     # /dev/video0 etc. müssen existieren
+```
+
+Chromium braucht Kamera-Zugriff. Im Kiosk-Modus muss der Flag
+`--use-fake-ui-for-media-stream` ODER eine vorab erteilte Permission
+gesetzt sein — siehe Schritt 14.
+
 ## Schritt 7 — VAPID-Keys + JWT-Secret generieren
 
 ```bash
@@ -232,6 +271,10 @@ JWT_SECRET=<dein-jwt-secret>
 VAPID_PUBLIC_KEY=<dein-public-key>
 VAPID_PRIVATE_KEY=<dein-private-key>
 VAPID_SUBJECT=mailto:du@example.com
+
+# Optional: TomTom-Key für Stau-Anzeige im Wand-Modus
+# Free Tier 2500 calls/day; ohne Key wird Verkehr-Card ausgeblendet
+TOMTOM_API_KEY=
 EOF
 
 chmod 600 ~/hestia/.env
@@ -439,7 +482,7 @@ USB-Scanner/Kamera und Touch-MHD-Räder — alles ohne Modulwechsel.
    - Kamera-Permission erteilen, sodass `WallPantryEntry` die Kamera
      nutzen kann
 
-### Variante B — RPi mit angeschlossenem Touchscreen
+### Variante B — RPi mit angeschlossenem Touchscreen (empfohlen)
 
 Wenn du den RPi selbst als Wandtablet nutzt:
 
@@ -450,12 +493,128 @@ cat > ~/.config/autostart/hestia.desktop <<'EOF'
 [Desktop Entry]
 Type=Application
 Name=Hestia Wall
-Exec=chromium-browser --kiosk --noerrdialogs --disable-infobars https://hestia.local/wall
+Exec=chromium-browser --kiosk --noerrdialogs --disable-infobars \
+  --use-fake-ui-for-media-stream \
+  --autoplay-policy=no-user-gesture-required \
+  https://hestia.local/wall
 X-GNOME-Autostart-enabled=true
 EOF
 ```
 
-`unclutter` blendet den Mauszeiger aus.
+`unclutter` blendet den Mauszeiger aus. Die Flags:
+- `--use-fake-ui-for-media-stream` — erteilt Kamera-Permission automatisch
+  (für die Wand-Erkennung)
+- `--autoplay-policy=no-user-gesture-required` — Video-Stream darf ohne
+  Click starten
+
+### Wand-Erkennung (optional)
+
+Wenn du die Gesichtserkennung im Wand-Modus nutzen möchtest:
+
+1. **Modelle ausliefern**: Beim ersten Build wurden `frontend/public/models/`
+   bereits ins Image gepackt (siehe Schritt 6b)
+2. **RPi-Kameramodul** ist nach Schritt 6c aktiv
+3. **Gesichter registrieren**: Auf einem regulären Gerät (Notebook,
+   Smartphone) `https://hestia.local/profile` öffnen → "Wand-Erkennung"
+   → 2-3 Aufnahmen pro Person aus verschiedenen Winkeln
+4. **Auf der Wand**: Im Header das Auge-Icon prüfen — Erkennung sollte
+   "Suche…" und dann "&lt;Name&gt; erkannt" anzeigen
+5. **Toggle**: Bei Bedenken jederzeit deaktivierbar — State persistiert
+   in `localStorage`
+
+Performance auf RPi 4 (Wand-Display):
+- Detection alle 2 s, 30 s "Schlaf" nach Erkennung
+- CPU-Last ohne aktive Erkennung: <2%
+- CPU-Last während Erkennung: ~30% (kurze Spikes von ~700 ms)
+- RAM-Footprint Chromium + Modelle: ~280 MB
+- Wird bei niedrigem Licht ungenauer — gute Beleuchtung erhöht
+  Trefferquote deutlich
+
+### PIR-Bewegungssensor (HC-SR501) einrichten
+
+Der PIR-Sensor sendet bei Bewegung `motion-detected` via Socket.io an alle
+Wall-Clients. Das weckt die Gesichtserkennung auf, ohne dauerhaft CPU zu
+verbrauchen.
+
+**Verkabelung HC-SR501:**
+```
+VCC  → Pin 2 (5V)
+OUT  → Pin 11 (GPIO 17)
+GND  → Pin 6
+```
+
+**Python-Script** (`~/hestia/pir_motion.py`):
+```python
+#!/usr/bin/env python3
+import RPi.GPIO as GPIO
+import requests
+import time
+
+GPIO.setmode(GPIO.BCM)
+GPIO.setup(17, GPIO.IN)
+
+SECRET = "dein-secret"  # aus MOTION_SECRET in .env
+
+while True:
+    if GPIO.input(17):
+        try:
+            requests.post(
+                "http://localhost:3001/api/internal/motion",
+                headers={"x-motion-secret": SECRET},
+                timeout=1
+            )
+        except Exception:
+            pass
+        time.sleep(5)  # 5s cooldown
+    time.sleep(0.2)
+```
+
+**Als systemd-Service einrichten:**
+```bash
+sudo nano /etc/systemd/system/hestia-pir.service
+```
+```ini
+[Unit]
+Description=Hestia PIR Motion Sensor
+After=network.target
+
+[Service]
+ExecStart=/usr/bin/python3 /home/pi/hestia/pir_motion.py
+Restart=always
+User=pi
+
+[Install]
+WantedBy=multi-user.target
+```
+```bash
+sudo systemctl enable --now hestia-pir
+```
+
+**Optional — `MOTION_SECRET` in `.env` setzen:**
+```
+MOTION_SECRET=dein-geheimes-secret
+```
+Ohne Secret ist der Endpoint loopback-only zugänglich (nur RPi selbst kann POST).
+
+### Persönliche Daten konfigurieren
+
+Damit `PersonalPanel` Inhalte zeigt, jeder Benutzer einmalig:
+
+1. App öffnen, einloggen, `/profile` ansteuern
+2. **Zuhause**: Heimatbahnhof oder Wohnadresse (z.B. "Zürich HB")
+3. **Arbeit**: Zielbahnhof (z.B. "Bern")
+4. **Pendel-Modus**: ÖV / Auto / Fahrrad / Zu Fuß
+   - ÖV → nutzt `transport.opendata.ch` mit dem Stationsnamen aus Label
+   - Auto → nutzt TomTom mit Lat/Lng (Key in `.env` erforderlich)
+5. **Wetter-Standort**: leer = nimmt Home; sonst eigener Punkt
+6. **Arbeitsschichten**: konkrete Schichten und/oder Muster anlegen
+   - Muster: Profil → "Schicht-Muster" → Wochentag + Zeit; werden täglich
+     automatisch in konkrete Schichten generiert (14-Tage-Horizont)
+   - Einzelschichten: weiterhin manuell unter "Schichten"
+7. **Dashboard anpassen**: `/wall` → SlidersHorizontal-Icon oben rechts
+   - Reihenfolge per Drag & Drop
+   - Einzelne Karten ein-/ausblenden
+   - Hintergrundfarbe und Sekundenanzeige konfigurieren
 
 ### USB-Scanner testen
 

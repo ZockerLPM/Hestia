@@ -34,9 +34,15 @@ JWT (jsonwebtoken)     Zustand                 PWA (vite-plugin-pwa)
 bcrypt                 Recharts                Workbox Service Worker
 web-push               ZXing (Kamera-Scan)
                        Tesseract.js (OCR)
+                       face-api.js (Wand-Erkennung)
                        react-hot-toast
                        idb-keyval (Offline)
                        Socket.io-Client
+
+Externe APIs (server-side proxy):
+- Open-Meteo (Wetter, kein Key)
+- transport.opendata.ch (CH-ÖV, kein Key)
+- TomTom Routing (Verkehr, optionaler Key)
 ```
 
 ## Verzeichnisstruktur
@@ -59,9 +65,12 @@ Hestia/
 │   └── package.json
 ├── frontend/                    React-App
 │   ├── index.html               PWA-Meta-Tags
-│   ├── public/icons/            App-Icons + SVG-Source
+│   ├── public/
+│   │   ├── icons/               App-Icons + SVG-Source
+│   │   └── models/              face-api.js-Modelle (von fetch-Skript befüllt)
 │   ├── scripts/
-│   │   └── generate-icons.mjs   PNG-Icons aus SVG
+│   │   ├── generate-icons.mjs   PNG-Icons aus SVG
+│   │   └── fetch-face-models.mjs face-api-Modelle nach public/models/
 │   ├── src/
 │   │   ├── main.tsx             React-Root + Toaster
 │   │   ├── App.tsx              Router-Konfig

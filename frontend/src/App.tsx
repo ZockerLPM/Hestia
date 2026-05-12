@@ -14,6 +14,7 @@ import Recipes from './pages/Recipes';
 import MealPlan from './pages/MealPlan';
 import Stats from './pages/Stats';
 import Wall from './pages/Wall';
+import Profile from './pages/Profile';
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { token } = useAuthStore();
@@ -51,6 +52,7 @@ export default function App() {
           <Route path="recipes" element={<Recipes />} />
           <Route path="meal-plan" element={<MealPlan />} />
           <Route path="stats" element={<Stats />} />
+          <Route path="profile" element={<Profile />} />
         </Route>
       </Routes>
     </BrowserRouter>

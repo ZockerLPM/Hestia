@@ -274,6 +274,58 @@ Gewichtung:
 Bei Treffer in Pantry werden auch `unit`, `category`, `location`, `barcode`
 zurückgegeben — Frontend übernimmt sie komplett bei Klick.
 
+### `/api/profile` (`routes/profile.ts`)
+
+User-eigene Personalisierungsfelder + Gesichts-Descriptors für die
+Wand-Erkennung.
+
+| Method | Path | Body / Query | Beschreibung |
+|--------|------|---------------|--------------|
+| GET | `/me` | — | Eigenes Profil (User ohne passwordHash) |
+| PUT | `/me` | partielle Felder aus `PROFILE_FIELDS` | Aktualisiert Profil-Felder (name, color, homeLat/Lng/Label, workLat/Lng/Label, commuteMode, weatherLat/Lng) |
+| GET | `/face-descriptors` | — | **Alle** Descriptors aller User (mit eingebettetem User-Subset) — vom Wand-Recognizer benutzt |
+| POST | `/face-descriptors` | `{descriptor: number[128], label?: string}` | Speichert eigenen Descriptor; validiert auf 128 Floats |
+| DELETE | `/face-descriptors/:id` | — | Löscht **nur eigene** Descriptors (404 bei fremden) |
+
+`PROFILE_FIELDS` ist eine Whitelist im Code:
+```typescript
+['name', 'color', 'homeLat', 'homeLng', 'homeLabel',
+ 'workLat', 'workLng', 'workLabel', 'commuteMode',
+ 'weatherLat', 'weatherLng']
+```
+
+### `/api/shifts` (`routes/shifts.ts`)
+
+Private Arbeitsschichten — werden im Profil verwaltet und im Wand-Modus
+unter "Nächste Schicht" angezeigt.
+
+| Method | Path | Body / Query | Beschreibung |
+|--------|------|---------------|--------------|
+| GET | `/` | `?userId=&upcoming=true` | Default: eigene Schichten. `upcoming=true` filtert auf `endsAt ≥ now`, limit 10 |
+| POST | `/` | `{startsAt, endsAt, note?}` | Anlegen für eingeloggten User |
+| PUT | `/:id` | partiell | Update — `404` bei fremder Schicht |
+| DELETE | `/:id` | — | Löschen — `404` bei fremder Schicht |
+
+### `/api/external` (`routes/external.ts`)
+
+Server-Side-Proxies für externe APIs. Vorteile:
+- Cache (`lib/externalCache.ts`) reduziert Calls und schont Rate-Limits
+- API-Keys (TomTom) bleiben Server-side, gelangen nicht ins Frontend
+- Vermeidet CORS
+
+| Method | Path | Query | Beschreibung |
+|--------|------|-------|--------------|
+| GET | `/status` | — | `{weather: true, transit: true, traffic: !!TOMTOM_API_KEY}` |
+| GET | `/weather` | `lat, lng` | Open-Meteo: aktuelles + 3-Tage-Forecast. **Kein API-Key**. Cache 15 min |
+| GET | `/transit` | `from, to` (Station-Namen, z.B. "Zürich HB") | transport.opendata.ch — Schweizer ÖV (SBB + Verbünde). 4 Verbindungen. Cache 1 min |
+| GET | `/traffic` | `fromLat, fromLng, toLat, toLng` | TomTom Routing mit Live-Traffic. Liefert `{durationSec, durationNoTrafficSec, delaySec, distanceM, congestion: 'free' \| 'moderate' \| 'heavy'}`. Cache 3 min. Wenn `TOMTOM_API_KEY` nicht gesetzt: `{enabled: false}` |
+
+Provider-Defaults und Konfiguration:
+- **Wetter**: Open-Meteo — kostenlos, keine Registrierung
+- **ÖV**: transport.opendata.ch — Schweizer Verbund-Daten, kostenlos
+- **Verkehr**: TomTom — Free Tier 2500 calls/day. API-Key kostenlos auf
+  developer.tomtom.com erstellen, in `.env` als `TOMTOM_API_KEY`
+
 ### `/api/push` (`routes/push.ts`)
 
 | Method | Path | Body | Beschreibung |
@@ -341,6 +393,21 @@ Findet alle nicht-completed recurring-Tasks mit `dueDate < now` und
 spawnt für jeden einen Nachfolger. Wird vom Cron um 03:00 und beim
 Server-Start aufgerufen.
 
+### `lib/externalCache.ts`
+
+In-memory TTL-Cache für die External-API-Proxies. Verhindert Spam an
+Open-Meteo/TomTom/transport.opendata.ch.
+
+```typescript
+cacheGet<T>(key: string): T | null
+cacheSet<T>(key: string, value: T, ttlMs: number): void
+cached<T>(key: string, ttlMs: number, fetcher: () => Promise<T>): Promise<T>
+```
+
+`cached()` ist der typische Wrapper — bei Miss wird gefetcht, bei Hit
+direkt zurückgegeben. Reicht für 2-3 Nutzer auf einem RPi; für größere
+Setups würde Redis Sinn ergeben.
+
 ### `lib/recurringFinance.ts`
 
 ```typescript
@@ -356,6 +423,59 @@ Iteriert alle aktiven `RecurringFinance` mit `autoCreate=true && nextRunAt <= no
 Erzeugt jeweils `FinanceEntry` und springt `nextRunAt` mit `advanceFinanceDate`
 vorwärts — kann mehrere Einträge pro Vorlage erzeugen (Catch-Up). Hardcap
 24 pro Lauf, um Endlosschleifen bei kaputtem `nextRunAt` zu vermeiden.
+
+---
+
+## Neue Routes (Wall, Mood, Motion, ShiftPatterns)
+
+### `GET/PUT /wall/config`
+
+Pro-User Wall-Konfiguration (Kartenreihenfolge, Sichtbarkeit, Hintergrundfarbe, Sekundenanzeige).
+
+```
+GET  /wall/config          → WallConfig | null
+PUT  /wall/config          → WallConfig (upsert)
+```
+
+Body für PUT: `{ cards: [{id, enabled, order, wide?}], bgColor?, showSeconds? }`
+
+### `POST /mood` · `GET /mood` · `GET /mood/today`
+
+Mood-Check-in (1–5 Emojis) beim Wall-Login.
+
+```
+POST /mood                { mood: 1–5, note? }      → MoodLog
+GET  /mood                                           → MoodLog[] (30 Tage)
+GET  /mood/today                                     → MoodLog | null
+```
+
+### `POST /internal/motion`
+
+Kein Auth — für PIR-Sensor-Script auf dem RPi. Broadcastet `motion-detected`
+via Socket.io an alle Wall-Clients.
+
+Header optional: `x-motion-secret: <MOTION_SECRET>` (aus `.env`).
+
+```
+POST /internal/motion      → { ok: true }
+```
+
+Socket-Event: `motion-detected` → `{ ts: number }` (Unix-Timestamp)
+
+### `GET/POST/PUT/DELETE /shifts/patterns`
+
+Wiederkehrende Schicht-Muster.
+
+```
+GET    /shifts/patterns              → ShiftPattern[]
+POST   /shifts/patterns              { weekday, startsAt, endsAt, validFrom?, note? }
+PUT    /shifts/patterns/:id          Partial<ShiftPattern>
+DELETE /shifts/patterns/:id          → { success: true }
+POST   /shifts/patterns/generate     → { created: number }  (manuell auslösen)
+```
+
+`generateShiftsFromPatterns(days=14)` ist auch als exportierte Funktion verfügbar
+und wird täglich um 03:00 vom Cron-Job und einmalig beim Start aufgerufen.
 
 ---
 

@@ -1,4 +1,4 @@
-import { NavLink } from 'react-router-dom';
+import { NavLink, Link } from 'react-router-dom';
 import { LogOut, Home } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
 import { navItems } from './navItems';
@@ -41,7 +41,10 @@ export default function Sidebar() {
 
       {user && (
         <div className="p-4 border-t border-gray-800 space-y-3">
-          <div className="flex items-center gap-3">
+          <Link
+            to="/profile"
+            className="flex items-center gap-3 -mx-2 px-2 py-1.5 rounded-lg hover:bg-gray-800 transition-colors"
+          >
             <div
               className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold text-white shrink-0"
               style={{ backgroundColor: user.color }}
@@ -50,15 +53,15 @@ export default function Sidebar() {
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-sm font-medium truncate">{user.name}</p>
-              <p className="text-xs text-gray-400 truncate">{user.email}</p>
+              <p className="text-xs text-gray-400 truncate">Profil bearbeiten</p>
             </div>
             <button
-              onClick={logout}
-              className="p-1.5 rounded-lg hover:bg-gray-800 text-gray-400 hover:text-white transition-colors"
+              onClick={(e) => { e.preventDefault(); logout(); }}
+              className="p-1.5 rounded-lg hover:bg-gray-700 text-gray-400 hover:text-white transition-colors"
             >
               <LogOut className="w-4 h-4" />
             </button>
-          </div>
+          </Link>
           <ThemeToggle />
         </div>
       )}
