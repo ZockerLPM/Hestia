@@ -1,0 +1,32 @@
+[Unit]
+Description=Hestia CSI camera → v4l2loopback bridge
+# v4l2loopback-Modul muss geladen sein, sonst kein /dev/video40
+Requires=systemd-modules-load.service
+After=systemd-modules-load.service network-online.target
+# Kiosk-Service soll erst starten, wenn die Cam-Bridge bereit ist
+Before=hestia-kiosk.service
+
+[Service]
+Type=simple
+# Root: rpicam-vid braucht Zugriff auf /dev/media* + GPU-Memory.
+# v4l2loopback-Output schreiben hat ohnehin meist Root-Rechte nötig.
+User=root
+
+# execute-Bit selbst-heilen (gleiche Begründung wie bei den anderen Units)
+ExecStartPre=-/bin/chmod +x /home/pi/hestia/scripts/hestia-cam-bridge.sh
+
+# !!! ANPASSEN !!! User-HOME-Pfad. Bei 'fabi' z.B. /home/fabi/...
+ExecStart=/home/pi/hestia/scripts/hestia-cam-bridge.sh
+
+# Auflösung/Framerate des Streams — Face-Recognition braucht nicht viel.
+# 640x480@15 ist auf RPi 4 ein guter Kompromiss aus CPU-Last und Bildqualität.
+Environment=HESTIA_CAM_WIDTH=640
+Environment=HESTIA_CAM_HEIGHT=480
+Environment=HESTIA_CAM_FPS=15
+Environment=HESTIA_CAM_LOOPBACK=/dev/video40
+
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -125,8 +125,31 @@ export function useFaceRecognition(opts: FaceRecognitionOptions): FaceRecognitio
         const userMap  = new Map([...grouped.values()].map((g) => [g.user.id, g.user]));
 
         // 3. Open camera
+        // RPi-Setup hat oft ein "HestiaCam"-v4l2loopback-Device (siehe
+        // scripts/hestia-cam-bridge.service) — das CSI-Modul direkt zu
+        // öffnen schlägt auf Bookworm fehl, weil libcamera die ISP-Pipeline
+        // braucht. Wenn ein Device mit diesem Label existiert, bevorzugen.
+        let videoConstraints: MediaTrackConstraints = {
+          facingMode: 'user', width: 320, height: 240,
+        };
+        try {
+          const devices = await navigator.mediaDevices.enumerateDevices();
+          const hestiaCam = devices.find(
+            (d) => d.kind === 'videoinput' && /hestia/i.test(d.label),
+          );
+          if (hestiaCam?.deviceId) {
+            videoConstraints = {
+              deviceId: { exact: hestiaCam.deviceId },
+              width: 320, height: 240,
+            };
+          }
+        } catch {
+          // enumerateDevices kann ohne Permission leere Labels liefern —
+          // dann fällt der Code auf den Default-facingMode zurück
+        }
+
         const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: 'user', width: 320, height: 240 },
+          video: videoConstraints,
         });
         if (cancelled) { stream.getTracks().forEach((t) => t.stop()); return; }
         streamRef.current = stream;

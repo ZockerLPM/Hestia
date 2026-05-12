@@ -41,6 +41,15 @@ fi
 #   1920x1080 → 1.0
 SCALE="${HESTIA_KIOSK_SCALE:-1.0}"
 
+# Remote-Debugging optional aktivierbar — z.B. zum Debuggen warum die
+# Kamera oder ein Modell nicht lädt. Mit HESTIA_KIOSK_DEBUG=1 starten,
+# dann von einem anderen Gerät http://hestia.local:9222 öffnen → Chromium
+# DevTools für die Wand-Session.
+DEBUG_FLAG=""
+if [[ "${HESTIA_KIOSK_DEBUG:-0}" == "1" ]]; then
+  DEBUG_FLAG="--remote-debugging-port=9222 --remote-debugging-address=0.0.0.0"
+fi
+
 exec chromium \
   --kiosk \
   --noerrdialogs \
@@ -51,8 +60,11 @@ exec chromium \
   --check-for-update-interval=31536000 \
   --autoplay-policy=no-user-gesture-required \
   --use-fake-ui-for-media-stream \
+  --use-fake-device-for-media-stream=false \
+  --enable-features=UseOzonePlatform \
   --disk-cache-size=50000000 \
   --user-data-dir="${PROFILE_DIR}" \
   --ozone-platform=wayland \
   --force-device-scale-factor="${SCALE}" \
+  ${DEBUG_FLAG} \
   "${URL}"

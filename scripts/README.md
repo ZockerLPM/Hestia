@@ -12,6 +12,9 @@ Skripte und systemd-Units für den RPi-Betrieb. Werden in
 | `hestia-kiosk.sh` | Launcher: holt Auto-Login-Token, startet Chromium |
 | `hestia-kiosk-login.sh` | Holt JWT via `/api/auth/login` für Auto-Login |
 | `hestia-kiosk.service` | systemd-Unit für Wand-Display via `cage` |
+| `hestia-cam-bridge.sh` | CSI-Kamera → v4l2loopback Pipeline (Bookworm-Workaround) |
+| `hestia-cam-bridge.service` | systemd-Unit für die Cam-Brücke |
+| `v4l2loopback.conf` | modprobe-Optionen für das virtuelle Capture-Device |
 
 ## Setup-Reihenfolge (kompakt)
 
@@ -35,6 +38,69 @@ Die mitgelieferten systemd-Units (`hestia-kiosk.service`,
 `ExecStartPre=-chmod +x …` selbst nach — also auch wenn du den Schritt
 vergisst, läuft der Service. Manuell nachziehen ist trotzdem sauberer
 und vermeidet eine Fehlersuche-Schleife.
+
+### 1a. CSI-Kamera für Chromium nutzbar machen (nur bei Cam-Modul am CSI-Port)
+
+Auf RPi OS Bookworm sind CSI-Kameras nicht direkt via V4L2 erreichbar
+(libcamera-Pipeline blockiert direkten Zugriff). Wir starten daher eine
+`rpicam-vid → ffmpeg → /dev/video40`-Brücke, die das Stream-Format
+Chromium-tauglich macht.
+
+```bash
+# Pakete: v4l2loopback Kernel-Modul + ffmpeg + rpicam-Tools
+sudo apt install -y v4l2loopback-dkms ffmpeg rpicam-apps
+
+# Modul-Optionen (card_label, video_nr, exclusive_caps)
+sudo cp ~/hestia/scripts/v4l2loopback.conf /etc/modprobe.d/
+
+# Modul beim Boot automatisch laden
+echo 'v4l2loopback' | sudo tee /etc/modules-load.d/v4l2loopback.conf
+
+# Sofort einmalig laden (für aktuellen Boot, ohne Reboot)
+sudo modprobe v4l2loopback
+ls /dev/video40   # muss jetzt existieren
+
+# Bridge-Service installieren
+sudo cp ~/hestia/scripts/hestia-cam-bridge.service /etc/systemd/system/
+# !!! User-HOME-Pfad in ExecStart= anpassen, falls nicht 'pi':
+sudoedit /etc/systemd/system/hestia-cam-bridge.service
+#   ExecStart=/home/fabi/hestia/scripts/hestia-cam-bridge.sh
+#   ExecStartPre=-/bin/chmod +x /home/fabi/hestia/scripts/hestia-cam-bridge.sh
+
+chmod +x ~/hestia/scripts/hestia-cam-bridge.sh
+sudo systemctl daemon-reload
+sudo systemctl enable --now hestia-cam-bridge
+
+# Test: schreibt Bridge wirklich in /dev/video40?
+sudo apt install -y fswebcam
+fswebcam -d /dev/video40 -r 640x480 --no-banner /tmp/cam-test.jpg
+ls -la /tmp/cam-test.jpg
+# Erwartet: ~30-50 KB JPEG. Wenn ja: Chromium sieht "HestiaCam" jetzt als ganz normale Webcam.
+
+# Kiosk neu starten, damit der Frontend-Code die HestiaCam findet
+sudo systemctl restart hestia-kiosk
+```
+
+**Troubleshooting:**
+
+```bash
+# Service-Status + Logs
+systemctl status hestia-cam-bridge --no-pager
+journalctl -u hestia-cam-bridge -n 50 --no-pager
+
+# Auflösung anpassen — wenn 640x480 zu wenig oder zu viel ist:
+sudo systemctl edit hestia-cam-bridge
+# [Service]
+# Environment=HESTIA_CAM_WIDTH=1280
+# Environment=HESTIA_CAM_HEIGHT=720
+# Environment=HESTIA_CAM_FPS=15
+```
+
+**Bei jedem Kernel-Update:** das `v4l2loopback-dkms`-Paket baut sich
+selbst gegen den neuen Kernel — bei seltenen Versionsmismatches manuell:
+```bash
+sudo dpkg-reconfigure v4l2loopback-dkms
+```
 
 ### 1. PIR-Sensor (optional, falls HC-SR501 angeschlossen)
 

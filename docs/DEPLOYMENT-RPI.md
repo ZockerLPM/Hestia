@@ -408,6 +408,19 @@ Chromium braucht Kamera-Zugriff. Im Kiosk-Modus muss der Flag
 `--use-fake-ui-for-media-stream` ODER eine vorab erteilte Permission
 gesetzt sein — siehe Schritt 14.
 
+> **Wichtig — CSI-Kameras auf Bookworm:** Das offizielle Raspberry-Pi-
+> Camera-Modul über den CSI-Port ist **nicht direkt für Chromium nutzbar**.
+> Auf Bookworm laufen alle CSI-Kameras durch die libcamera-ISP-Pipeline;
+> `/dev/video0` listet zwar Standard-V4L2-Formate, liefert beim
+> `VIDIOC_STREAMON` aber `Invalid argument`. Wir brauchen die
+> **v4l2loopback-Brücke** (`scripts/hestia-cam-bridge.service`, Setup
+> siehe `scripts/README.md`), die einen `rpicam-vid → ffmpeg → /dev/video40`
+> Stream als "HestiaCam" sichtbar macht. `useFaceRecognition` im Frontend
+> erkennt das Label automatisch und nutzt es bevorzugt.
+>
+> **Alternative ohne Brücke:** eine USB-Webcam an einen USB-Port stecken.
+> Die meldet sich direkt als YUYV-V4L2-Capture, kein Workaround nötig.
+
 ## Schritt 7 — VAPID-Keys + JWT-Secret generieren
 
 Web-Push braucht ein einmaliges VAPID-Schlüsselpaar, JWT braucht ein
