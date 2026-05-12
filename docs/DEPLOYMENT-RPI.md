@@ -1072,6 +1072,69 @@ sudo chown -R 1000:1000 /mnt/hestia-data/db
 # Node-User im Container hat UID 1000 (Standard)
 ```
 
+### Prisma: "Could not parse schema engine response" / "Defaulting to openssl-1.1.x"
+
+Symptom: Backend-Container startet, läuft sofort wieder in Restart-Loop,
+Logs zeigen:
+```
+prisma:warn Prisma failed to detect the libssl/openssl version to use,
+and may not work as expected. Defaulting to "openssl-1.1.x".
+Error: Could not parse schema engine response: SyntaxError: ...
+```
+
+Ursache: Prisma 5 hat dauerhafte libssl-Detection-Probleme auf
+**Alpine ARM64**. Selbst mit `apk add openssl` und expliziten Alpine-
+`binaryTargets` schlägt der Engine-Start fehl. Repo-Stand ab Mai 2026
+nutzt daher `node:22-slim` (Debian Bookworm) statt `node:22-alpine` —
+Debian liefert `libssl3` standardmäßig kompatibel.
+
+Wenn du einen älteren Stand hast, prüfe:
+
+1. **`backend/Dockerfile`** muss `FROM node:22-slim` verwenden und in
+   beiden Stages OpenSSL installieren:
+   ```dockerfile
+   FROM node:22-slim AS builder
+   RUN apt-get update \
+    && apt-get install -y --no-install-recommends openssl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+   # ... rest
+   FROM node:22-slim
+   RUN apt-get update \
+    && apt-get install -y --no-install-recommends openssl ca-certificates wget \
+    && rm -rf /var/lib/apt/lists/*
+   # ... rest
+   ```
+
+2. **`backend/prisma/schema.prisma`** muss die Debian-Targets enthalten
+   (nicht die musl-Varianten, die sind für Alpine):
+   ```prisma
+   generator client {
+     provider      = "prisma-client-js"
+     binaryTargets = ["native", "linux-arm64-openssl-3.0.x", "debian-openssl-3.0.x"]
+   }
+   ```
+
+Nach dem Pull/Anpassen Image **ohne Cache** neu bauen, sonst greifen
+gecachte Layer mit der alten Alpine-Engine:
+```bash
+docker compose -f docker-compose.prod.yml build --no-cache backend
+docker compose -f docker-compose.prod.yml up -d
+docker compose -f docker-compose.prod.yml logs -f backend
+# Erwarteter Output: "Hestia backend running on port 3001"
+```
+
+> Hinweis zur Image-Größe: `node:22-slim` ist ~150 MB statt ~50 MB bei
+> Alpine. Auf einer 32-GB-SSD irrelevant; im Tausch erhältst du eine
+> wesentlich kompatiblere Prisma-Umgebung.
+
+> IDE-Scanner / Docker Desktop melden ggf. "high vulnerability" für
+> `node:22-slim`. Das sind in der Regel CVEs in Debian-Paketen, die
+> nichts mit unserer App zu tun haben (z.B. in libsystemd oder perl-base).
+> Da Hestia ausschließlich im LAN läuft und keine externen Inputs
+> verarbeitet, ist das akzeptabel. `apt-get upgrade` im Dockerfile
+> würde die meisten patchen, ändert aber die Image-Größe und ist nicht
+> nötig.
+
 ### Hoher CPU-Load
 
 RPi 4 hat 4 Cores — Node + Nginx + Caddy gleichzeitig ist meist
