@@ -8,12 +8,44 @@ zugreifen, inklusive PWA-Installation, Web Push und Kamera-Scan.
 
 ## Was du brauchst
 
+**Pflicht (Server-Betrieb):**
 - Raspberry Pi 4 oder 5 (mindestens 4 GB RAM)
 - microSD-Karte ≥ 32 GB (Class 10 oder besser)
 - Stabiler Strom (USB-C-Netzteil ≥ 3 A)
 - Ethernet oder WLAN
-- Optional: USB-SSD für DB + Backups (sehr empfohlen)
-- Zugang zu deinem Router (DHCP-Reservation oder statische IP)
+- Zugang zu deinem Router (für DHCP-Reservation)
+
+**Empfohlen:**
+- USB-SSD für DB + Backups (Schritt 3) — SD-Karten verschleißen unter
+  DB-Last; SSD verlängert die Lebensdauer um Jahre
+
+**Optional — nur wenn du den RPi auch als Wand-Display nutzt:**
+- HDMI-Touchscreen (z.B. 10–15"-Industrie-Display oder Waveshare-Panel)
+- HC-SR501 PIR-Bewegungssensor + 3 Jumper-Kabel (Schritt 14, PIR-Abschnitt)
+- Optional: RPi-Kameramodul (für Gesichtserkennung im Wand-Modus)
+
+## Roadmap durch diese Anleitung
+
+| Schritt | Was passiert | Aufwand |
+|---------|--------------|---------|
+| 1–2 | RPi OS Lite installieren, Docker einrichten | ~30 Min |
+| 3 | USB-SSD vorbereiten und mounten | ~10 Min |
+| 4 | Hestia-Code auf den RPi bringen | ~5 Min |
+| 5 | Production-`docker-compose.prod.yml` anlegen | ~5 Min |
+| 6 | Backend-Dockerfile kurz prüfen | ~2 Min |
+| 6b | Face-API-Modelle laden (optional) | ~3 Min |
+| 6c | RPi-Kamera aktivieren (optional) | ~5 Min |
+| 7 | JWT- und VAPID-Schlüssel erzeugen | ~5 Min |
+| 8 | `.env` mit allen Secrets schreiben | ~3 Min |
+| 9–10 | mkcert-Zertifikat + Caddyfile | ~15 Min |
+| 11 | Erster `docker compose up --build` | ~15 Min |
+| 12 | Clients konfigurieren (CA, DNS) | ~10 Min pro Gerät |
+| 13 | App in Production testen, Push-Test | ~10 Min |
+| 14 | Wandtablet / RPi-Kiosk + PIR-Sensor | ~30 Min |
+| 15–16 | Backup + Update automatisieren | ~10 Min |
+
+Erstmaliges Komplettsetup: **~3 Stunden**, davon ~30 Min Wartezeit beim
+ersten Docker-Build.
 
 ## Übersicht der Architektur
 
@@ -50,35 +82,61 @@ zugreifen, inklusive PWA-Installation, Web Push und Kamera-Scan.
 ## Schritt 1 — RPi-OS installieren
 
 1. **Raspberry Pi Imager** laden: <https://www.raspberrypi.com/software/>
-2. **Raspberry Pi OS Lite (64-bit)** auswählen (keine Desktop-Umgebung nötig)
-3. Beim Imagen unter "Erweiterte Optionen":
-   - Hostname: `hestia`
-   - SSH aktivieren mit Public-Key (oder Passwort)
-   - User: dein User + Passwort
-   - WLAN konfigurieren (falls kein Ethernet)
-4. SD-Karte einsetzen, RPi starten
-5. Per SSH verbinden: `ssh <user>@hestia.local` (oder per IP)
+2. Storage wählen (deine microSD-Karte)
+3. OS wählen: **Raspberry Pi OS (other) → Raspberry Pi OS Lite (64-bit)**.
+   "Lite" heißt: keine Desktop-Umgebung, keine vorinstallierten GUI-Apps —
+   genau das, was wir für einen Docker-Server wollen. Den Browser für den
+   Wand-Modus installieren wir in Schritt 14 gezielt nach.
+4. Vor dem Schreiben unbedingt das ⚙️-Zahnrad öffnen ("OS-Anpassung"):
+   - **Hostname**: `hestia` → später erreichbar als `hestia.local`
+   - **SSH aktivieren**: Public-Key-Authentifizierung empfohlen
+   - **Benutzername + Passwort**: merken — alle späteren Schritte in
+     dieser Doku zeigen `pi` als Beispiel. Wenn du z.B. `marc` wählst,
+     ersetze überall `pi` → `marc` und `/home/pi/` → `/home/marc/`.
+   - **WLAN konfigurieren** (falls kein Ethernet): SSID + Passwort + Land
+   - **Locale-Einstellungen**: Zeitzone `Europe/Berlin`, Tastatur `de`
+5. Schreiben starten (~5 Min), Karte auswerfen, in den RPi stecken,
+   Strom dran. Erster Boot dauert ~60 s (resize-Partition, SSH-Keys).
+6. Vom Hauptrechner per SSH verbinden:
+   ```bash
+   ssh pi@hestia.local
+   # Wenn .local nicht auflöst: ssh pi@192.168.1.<x>, IP aus dem Router
+   ```
 
 ## Schritt 2 — System aktualisieren und Tools installieren
 
+Erstmal alles auf den neuesten Stand bringen und die Basis-Tools nachziehen,
+die wir später brauchen (`curl` für Downloads, `git` für den Code-Pull,
+`ufw` für die Firewall, `ca-certificates` für TLS).
+
 ```bash
 sudo apt update && sudo apt upgrade -y
-sudo apt install -y curl git ca-certificates gnupg lsb-release ufw
+sudo apt install -y curl git ca-certificates gnupg lsb-release ufw openssl
 ```
 
 ### Docker installieren
 
+Das offizielle "Convenience Script" — installiert Docker Engine + Compose-
+Plugin in einem Schritt, funktioniert sauber auf RPi OS Bookworm:
+
 ```bash
 curl -fsSL https://get.docker.com | sudo sh
+
+# Aktuellen User in die docker-Gruppe aufnehmen, damit du Docker ohne
+# sudo aufrufen kannst:
 sudo usermod -aG docker $USER
-# einmal aus- und einloggen, damit die Gruppe greift
+
+# Wichtig: Die Gruppenmitgliedschaft greift erst nach einem neuen Login.
+# Am einfachsten: SSH-Session beenden und neu verbinden.
 exit
 ```
 
-Wieder verbinden, dann prüfen:
+Neu einloggen und Docker prüfen:
 ```bash
-docker --version
-docker compose version
+ssh pi@hestia.local
+docker --version          # Docker version 27.x.x oder neuer
+docker compose version    # Docker Compose version v2.x.x
+docker run --rm hello-world   # End-to-end-Test, lädt ein 13 KB Image
 ```
 
 ### Statische IP via Router
@@ -99,35 +157,93 @@ sudo ufw enable
 
 ## Schritt 3 — USB-SSD für Datenbank (sehr empfohlen)
 
-SD-Karten haben begrenzte Schreibzyklen. SQLite kann sie schnell
-verschleißen. USB-SSD ist deutlich robuster.
+SD-Karten haben begrenzte Schreibzyklen. SQLite mit regelmäßigen Writes
+kann sie nach 1–2 Jahren verschleißen. Eine USB-SSD (auch eine alte
+60-GB-SSD im USB-Adapter) ist deutlich robuster und auch schneller.
+
+> Wenn du erstmal ohne SSD starten willst: überspringe diesen Schritt
+> und ersetze in der `docker-compose.prod.yml` (Schritt 5) den Eintrag
+> `/mnt/hestia-data/db:/data` durch ein Docker-Volume:
+> `- hestia-data:/data` und unten `volumes:` ergänzen um `hestia-data:`.
+
+### SSD identifizieren
 
 ```bash
-# SSD anstecken, identifizieren
+sudo apt install -y parted    # falls noch nicht da
+
+# SSD anstecken, kurz warten, dann:
 lsblk
-# vermutlich /dev/sda1 oder ähnlich
+# Beispiel-Output:
+#   sda           931.5G  disk
+#   └─sda1        931.5G  part   ← die Partition, die wir mounten wollen
+```
 
+Welcher Device-Node deine SSD ist (`/dev/sda`, `/dev/sdb`, ...) hängt
+davon ab, was sonst noch dranhängt. Notiere ihn dir aus dem `lsblk`-Output.
+
+### Falls die SSD leer/neu ist: einmalig formatieren
+
+> ⚠️ **Datenverlust-Risiko!** Folgender Block löscht ALLES auf der SSD.
+> Doppelt prüfen, dass `/dev/sdX` wirklich die neue SSD ist, nicht die
+> Boot-Karte.
+
+```bash
+DEV=/dev/sda                       # ggf. anpassen
+sudo parted "$DEV" --script mklabel gpt mkpart primary ext4 0% 100%
+sudo mkfs.ext4 -L hestia-data "${DEV}1"
+```
+
+### Mounten und in fstab eintragen
+
+```bash
 sudo mkdir -p /mnt/hestia-data
-sudo blkid /dev/sda1
-# UUID notieren
 
-# Auto-Mount in /etc/fstab:
+# UUID der frisch formatierten Partition holen:
+sudo blkid /dev/sda1
+# z.B.: /dev/sda1: LABEL="hestia-data" UUID="abc12345-..." TYPE="ext4" ...
+
+# UUID einsetzen — bessere Methode als /dev/sdX, weil stabil:
 echo 'UUID=<deine-uuid>  /mnt/hestia-data  ext4  defaults,noatime,nofail  0  2' \
   | sudo tee -a /etc/fstab
 
 sudo mount -a
+# Wenn 'mount -a' fehlerlos durchläuft, ist auch der Reboot sicher.
+
+# Berechtigung dem User geben:
 sudo chown -R $USER:$USER /mnt/hestia-data
+df -h /mnt/hestia-data    # zeigt freien Platz
 ```
 
 ## Schritt 4 — Hestia-Code holen
 
+Zwei Wege — je nachdem, ob dein Code in einem Git-Repo liegt oder lokal:
+
+### Variante A — git clone (empfohlen, ermöglicht spätere Updates)
+
 ```bash
 mkdir -p ~/hestia && cd ~/hestia
 git clone <dein-repo-url> .
-
-# oder per SCP vom Windows-Rechner
-scp -r s:\Programmieren\Hestia\* <user>@hestia.local:~/hestia/
+# z.B. git clone git@github.com:<user>/hestia.git .
 ```
+
+### Variante B — SCP vom Entwickler-Rechner
+
+Falls du den Code noch nirgends gepusht hast: vom **Windows**-Rechner aus
+(PowerShell), in dem Ordner mit dem Repo:
+
+```powershell
+# Auf Windows ausführen — kopiert ins HOME des pi-Users
+scp -r S:\Programmieren\Hestia\* pi@hestia.local:~/hestia/
+```
+
+Vom **macOS/Linux**-Rechner:
+```bash
+rsync -avz --exclude node_modules --exclude .git \
+  ./hestia/ pi@hestia.local:~/hestia/
+```
+
+> Empfehlung: auch bei lokalem Code mindestens ein lokales Git-Repo
+> anlegen, damit du in Schritt 16 (Updates) `git pull` benutzen kannst.
 
 ## Schritt 5 — Production-Compose erstellen
 
@@ -191,36 +307,65 @@ volumes:
 EOF
 ```
 
-## Schritt 6 — Backend-Image für ARM64 anpassen
+## Schritt 6 — Backend-Image prüfen (in der Regel nichts zu tun)
 
-`backend/Dockerfile` ist bereits multi-stage, läuft auf arm64. Aber die DB
-liegt jetzt unter `/data/hestia.db` statt im Container. Prüfen, dass das
-Dockerfile beim Start `prisma db push` ausführt:
+Das mitgelieferte `backend/Dockerfile` ist multi-stage gebaut und läuft
+nativ auf arm64. Es führt beim Container-Start automatisch
+`prisma db push` aus, sodass Schema-Änderungen ohne separate Migration
+greifen. Du musst hier normalerweise nichts anpassen — kurz prüfen reicht:
 
 ```bash
-cat ~/hestia/backend/Dockerfile
+tail -n 5 ~/hestia/backend/Dockerfile
+# Erwartet etwa:
+#   RUN mkdir -p data
+#   EXPOSE 3001
+#   CMD ["sh", "-c", "npx prisma db push && node dist/index.js"]
 ```
 
-Wenn nicht vorhanden, am Ende des Dockerfile sicherstellen:
-```dockerfile
-CMD npx prisma db push --skip-generate && node dist/index.js
-```
+Die DB liegt im Container unter `/data/hestia.db` und ist via dem
+Bind-Mount aus der `docker-compose.prod.yml` (`/mnt/hestia-data/db`)
+auf der USB-SSD persistent.
 
 ## Schritt 6b — Face-Modelle herunterladen (optional, für Wand-Erkennung)
 
 Wenn du die Gesichtserkennung im Wand-Modus nutzen willst, müssen die
-face-api.js-Modelle einmalig nach `frontend/public/models/` geladen
-werden — sie werden ins Frontend-Image gebacken.
+face-api.js-Modelle (~7 MB, 6 Dateien) **vor dem ersten Docker-Build**
+unter `frontend/public/models/` liegen. Sie werden in das Nginx-Image
+gebacken und über `https://hestia.local/models/*` ausgeliefert.
+
+> **Wichtig:** RPi OS Lite hat **kein Node.js installiert**. Das im Repo
+> mitgelieferte `npm run face:models`-Skript funktioniert daher auf dem
+> Host nicht. Wir laden die Modelle stattdessen direkt mit `curl` —
+> das genau gleiche Resultat, eine Abhängigkeit weniger.
 
 ```bash
-cd ~/hestia/frontend
-npm install --no-save  # nur falls noch nicht geschehen
-npm run face:models
+MODELS_DIR=~/hestia/frontend/public/models
+mkdir -p "$MODELS_DIR"
+BASE=https://raw.githubusercontent.com/vladmandic/face-api/master/model
+
+for f in \
+    tiny_face_detector_model-weights_manifest.json \
+    tiny_face_detector_model.bin \
+    face_landmark_68_model-weights_manifest.json \
+    face_landmark_68_model.bin \
+    face_recognition_model-weights_manifest.json \
+    face_recognition_model.bin; do
+  echo "↓ $f"
+  curl -fsSL "$BASE/$f" -o "$MODELS_DIR/$f"
+done
+
+ls -lh "$MODELS_DIR"
+# Erwartete Größen:
+#   tiny_face_detector_model.bin     ~190 KB
+#   face_landmark_68_model.bin       ~350 KB
+#   face_recognition_model.bin       ~6.2 MB
+#   + 3 Manifest-JSONs (je <1 KB)
 ```
 
-Resultat: 4 Dateien (~7 MB total) in `frontend/public/models/`. Beim
-nächsten `docker compose build` landen sie automatisch im Nginx-Image
-und werden über `https://hestia.local/models/*` ausgeliefert.
+Beim nächsten `docker compose build` landen diese Dateien automatisch
+unter `/usr/share/nginx/html/models/` im Frontend-Image. Solange der
+Ordner leer bleibt, läuft der Wand-Modus trotzdem — nur die Gesichts-
+erkennung ist dann deaktiviert (zeigt "Keine Gesichter registriert").
 
 ## Schritt 6c — RPi-Kameramodul aktivieren (für Wand-Erkennung)
 
@@ -246,23 +391,50 @@ gesetzt sein — siehe Schritt 14.
 
 ## Schritt 7 — VAPID-Keys + JWT-Secret generieren
 
-```bash
-cd ~/hestia/backend
-docker compose -f ../docker-compose.prod.yml run --rm backend npm run push:keys
-```
+Web-Push braucht ein einmaliges VAPID-Schlüsselpaar, JWT braucht ein
+zufälliges Server-Secret. Beides erzeugst du **ohne Node auf dem Host**:
 
-Notiere `VAPID_PUBLIC_KEY` und `VAPID_PRIVATE_KEY`. Falls das `docker run`
-zu früh ist (Image nicht gebaut), kannst du die Keys auch lokal generieren:
+### JWT-Secret (openssl ist auf Lite vorinstalliert)
 
 ```bash
-# Auf RPi, mit Node + web-push installiert:
-npx web-push generate-vapid-keys
+JWT_SECRET=$(openssl rand -base64 48)
+echo "JWT_SECRET=$JWT_SECRET"
+# Beispielausgabe:
+# JWT_SECRET=zK9lqJ3v7pYxN8mR2tQ5wA1eS6fD0gH4uI8oP3bC7vN5xY9zA1eS6fD0gH4u
 ```
 
-JWT-Secret:
+Notiere dir den Wert — du brauchst ihn in Schritt 8.
+
+### VAPID-Keys via Docker (kein npm/Node-Install nötig)
+
+Wir starten kurz einen Wegwerf-Container, der die Keys ausgibt:
+
 ```bash
-openssl rand -base64 48
+docker run --rm node:22-alpine sh -c \
+  'npx --yes -q web-push generate-vapid-keys 2>/dev/null'
 ```
+
+Erstmaliger Aufruf lädt das `node:22-alpine`-Image (~50 MB) und das
+`web-push`-npm-Paket — dauert auf einer normalen RPi-Verbindung
+ca. 60–90 Sekunden. Ausgabe etwa so:
+
+```
+=======================================
+Public Key:
+BNw1MaXa7w...8z3vT4qK
+Private Key:
+8vRfP2k...xY9zA1eS
+=======================================
+```
+
+Beide Werte für Schritt 8 notieren.
+
+> **Alternative — nach dem ersten Build:** Sobald das Backend-Image
+> existiert (Schritt 11), kannst du auch das mitgelieferte npm-Script
+> verwenden, das gleich im `KEY=...`-Format ausgibt:
+> ```bash
+> docker compose -f ~/hestia/docker-compose.prod.yml run --rm backend npm run push:keys
+> ```
 
 ## Schritt 8 — `.env` schreiben
 
@@ -359,27 +531,63 @@ EOF
 
 ## Schritt 11 — Erster Start
 
+> **Voraussetzung:** Schritte 6b (Face-Modelle, falls gewünscht), 7
+> (VAPID/JWT), 8 (`.env`), 9 (Zertifikat) und 10 (Caddyfile) sind durch.
+> Andernfalls bricht der Build entweder ab oder die Container starten
+> ohne notwendige Secrets.
+
 ```bash
 cd ~/hestia
 mkdir -p /mnt/hestia-data/db
 docker compose -f docker-compose.prod.yml up -d --build
 ```
 
-Logs prüfen:
+> **Build-Dauer auf dem RPi 4:** ~12–18 Minuten beim ersten Mal — Node
+> kompiliert TypeScript für Backend und Frontend, vite bundelt ~3500
+> Module, faceapi-Modelle werden ins Image kopiert. Folge-Builds nutzen
+> den Docker-Layer-Cache und sind in 1–3 Minuten durch.
+
+Logs während des Hochfahrens beobachten:
 ```bash
 docker compose -f docker-compose.prod.yml logs -f
+# Mit Ctrl+C wieder verlassen — Container laufen weiter
 ```
 
-Wenn alles läuft:
-- Backend-Healthcheck: `curl http://localhost:3001/api/health`
-- Frontend: `curl http://localhost`
-- Caddy mit HTTPS: `curl -k https://localhost`
+Healthchecks nach dem Start. In `docker-compose.prod.yml` sind Backend
+und Frontend nur intern erreichbar (`expose:`), nach außen mappt nur
+Caddy auf 80/443. Drei Möglichkeiten zum Prüfen:
 
-### Seed-Daten (einmalig)
+```bash
+# 1) Container-Status auf einen Blick — alle drei sollten "running" sein
+docker compose -f docker-compose.prod.yml ps
+
+# 2) Backend von innen testen (umgeht Caddy/Frontend)
+docker compose -f docker-compose.prod.yml exec backend \
+  wget -qO- http://localhost:3001/api/health
+# → {"status":"ok","version":"1.0.0"}
+
+# 3) End-to-end über Caddy (das, was Clients später auch nutzen)
+#    -k weil curl die mkcert-CA auf dem Server nicht kennt; aus dem
+#    Browser, wo die CA installiert ist, ist es vertrauenswürdig.
+curl -k https://localhost/api/health
+# → {"status":"ok","version":"1.0.0"}
+```
+
+Wenn etwas hakt, **Logs des betreffenden Containers** ansehen:
+```bash
+docker compose -f docker-compose.prod.yml logs backend --tail=50
+docker compose -f docker-compose.prod.yml logs caddy --tail=50
+```
+
+### Seed-Daten (einmalig — legt Demo-User, Kategorien, Beispieldaten an)
 
 ```bash
 docker compose -f docker-compose.prod.yml exec backend npm run db:seed
 ```
+
+Demo-Logins danach: `person1@hestia.local` / `hestia123` und
+`person2@hestia.local` / `hestia123`. **Diese Passwörter vor dem
+produktiven Einsatz ändern** (Profil-Seite → Passwort ändern).
 
 ## Schritt 12 — Clients konfigurieren
 
@@ -420,20 +628,38 @@ Firefox + manche Apps haben eigenen Store — dort separat importieren.
 
 ### DNS auflösbar machen
 
-Variante A — **mDNS**: `hestia.local` wird auf den meisten Systemen
-automatisch erkannt (Bonjour/Avahi). Auf Linux:
-```bash
-sudo apt install -y avahi-daemon
-sudo systemctl enable --now avahi-daemon
-```
+Damit `https://hestia.local` von Clients **und** vom RPi selbst (für den
+Kiosk-Browser!) gefunden wird, brauchst du eine Form von Namensauflösung.
 
-Variante B — **Router-DNS**: Eintrag im Router-DNS-Server hinzufügen
-(meist unter "lokale DNS"-Einstellungen): `hestia.local → 192.168.1.100`.
+> **Auch auf dem RPi-Server selbst installieren**, wenn der RPi als
+> Wand-Display dient — sonst kann der Chromium-Kiosk `hestia.local`
+> nicht auflösen:
+> ```bash
+> sudo apt install -y avahi-daemon
+> sudo systemctl enable --now avahi-daemon
+> # Test:
+> avahi-resolve -n hestia.local
+> # → hestia.local  192.168.1.100
+> ```
 
-Variante C — **Hosts-File** auf jedem Client (Fallback):
+Drei Optionen, eine reicht:
+
+**Variante A — mDNS** (empfohlen, zero-config): `hestia.local` wird auf
+den meisten Systemen automatisch erkannt (Bonjour auf macOS/iOS, Avahi
+auf Linux, ab Win10 Build 17134 nativ). Voraussetzung: alle Clients und
+der RPi sind im gleichen Broadcast-Domain (Heim-LAN).
+
+**Variante B — Router-DNS**: Eintrag im Router-DNS-Server hinzufügen
+(meist unter "lokale DNS"-Einstellungen oder "Host Override"):
+`hestia.local → 192.168.1.100`. Funktioniert auch über Subnetze.
+
+**Variante C — Hosts-File** auf jedem Client (Fallback, wenn A und B
+nicht gehen):
 ```
 192.168.1.100  hestia.local
 ```
+Pfade: `/etc/hosts` (Linux/Mac), `C:\Windows\System32\drivers\etc\hosts`
+(Windows, Admin nötig).
 
 ## Schritt 13 — App in Production testen
 
@@ -448,16 +674,22 @@ Du solltest:
 ### Push-Notifications testen
 
 ```bash
-# Token holen
+# jq für JSON-Parsing (nicht in Lite vorinstalliert)
+sudo apt install -y jq
+
+# Token via Login holen
 TOKEN=$(curl -k -s -X POST https://hestia.local/api/auth/login \
   -H 'Content-Type: application/json' \
   -d '{"email":"person1@hestia.local","password":"hestia123"}' | jq -r .token)
+echo "$TOKEN"   # sollte ein JWT-String sein, kein 'null'
 
-# Im Browser: Dashboard → "Benachrichtigungen aktivieren"
+# Im Browser auf einem Smartphone:
+#   Dashboard → "Benachrichtigungen aktivieren" → erlauben
 
-# Test-Push senden
+# Test-Push vom Server aus senden
 curl -k -X POST https://hestia.local/api/push/test \
   -H "Authorization: Bearer $TOKEN"
+# Auf dem Smartphone sollte jetzt eine Hestia-Benachrichtigung erscheinen.
 ```
 
 ## Schritt 14 — Wandtablet einrichten
@@ -489,47 +721,156 @@ USB-Scanner/Kamera und Touch-MHD-Räder — alles ohne Modulwechsel.
 
 ### Variante B — RPi mit angeschlossenem Touchscreen (empfohlen)
 
-Der Repo-Stand liefert ein fertiges Kiosk-Setup für **RPi OS Lite** (ohne
-Desktop-Environment) mit dem minimalen Wayland-Kiosk-Compositor `cage` —
-kein Login-Manager, kein Window-Manager-Overhead, ~30 MB RAM idle.
+Der Repo-Stand liefert ein fertiges Kiosk-Setup für **RPi OS Lite** (also
+das CLI-only-System, das du in Schritt 1 installiert hast). Du bekommst
+einen vollwertigen Chromium-Browser auf dem Display — **ohne Desktop-
+Environment, ohne Login-Manager, ohne Window-Manager**.
+
+#### Geht das überhaupt mit Lite?
+
+Ja. RPi OS Lite hat zwar keinen Desktop, aber die Kernel-Grafiktreiber
+(DRM/KMS) sind aktiv. Sobald irgendein Programm Pixel auf den Framebuffer
+schreibt, sieht man sie. Wir nutzen dafür **cage**:
+
+| Komponente | Aufgabe | Größe |
+|------------|---------|-------|
+| `cage` | Minimaler Wayland-Compositor, der **ein** Programm fullscreen anzeigt. Keine Fensterdekoration, keine Taskbar, kein Menü. | ~200 KB Binary |
+| `seatd` | Vermittelt Zugriff auf Grafik-/Input-Geräte ohne logind. | ~50 KB |
+| `chromium` | Der eigentliche Browser, läuft als Wayland-Client in cage. | ~280 MB RAM |
+
+**Trade-offs gegenüber RPi OS mit Desktop:**
+
+|  | Lite + cage | RPi OS Desktop |
+|---|---|---|
+| RAM idle (gesamt) | ~150 MB OS + 30 MB cage + 280 MB Chromium ≈ **460 MB** | ~400 MB Desktop + 280 MB Chromium ≈ **680 MB** |
+| Boot bis Wand sichtbar | ~15 s | ~25–35 s |
+| Updates / Angriffsfläche | minimal (nur was du `apt install`st) | voller Desktop-Stack |
+| Andere Apps parallel | nein (echter Kiosk) | ja |
+| Lokal debuggen am Display | nur über SSH oder Service-Stop | direkter Desktop-Zugriff |
+
+Für ein dauerhaft an die Wand geklebtes Display ist Lite + cage die
+richtige Wahl. Du verlierst nichts, was du im `/wall`-Modus brauchst.
+
+#### Installation
 
 ```bash
+# 1. Pakete installieren
 sudo apt install -y cage chromium seatd
-sudo systemctl enable --now seatd
-sudo usermod -aG video,input,seat,render,tty pi   # User ggf. anpassen
 
-# tty1 darf nicht von getty belegt sein, sonst kollidiert cage damit:
+# 2. seatd starten (regelt GPU-/Tastatur-Zugriff)
+sudo systemctl enable --now seatd
+
+# 3. Den User in die nötigen Gruppen aufnehmen
+#    'pi' ggf. durch deinen User ersetzen, falls anders:
+sudo usermod -aG video,input,seat,render,tty pi
+
+# 4. tty1 freiräumen — sonst kollidiert cage mit dem Login-Prompt:
 sudo systemctl disable --now getty@tty1.service
 
-# Service + Launcher installieren (Repo-Pfade)
+# 5. Service + Launcher aus dem Repo installieren
 sudo cp ~/hestia/scripts/hestia-kiosk.service /etc/systemd/system/
 chmod +x ~/hestia/scripts/hestia-kiosk.sh
 
-# Falls der User nicht 'pi' heißt: User= und HOME-Pfad in der Unit anpassen.
+# 6. Username/HOME in der Unit anpassen, falls du nicht 'pi' bist:
 sudoedit /etc/systemd/system/hestia-kiosk.service
+#   → User=<dein-user>
+#   → ExecStart-Pfad: /home/<dein-user>/hestia/scripts/hestia-kiosk.sh
 
+# 7. Aktivieren
 sudo systemctl daemon-reload
 sudo systemctl enable --now hestia-kiosk.service
 ```
 
-Beim nächsten Boot startet automatisch Chromium auf
-`https://hestia.local/wall` im Vollbild. Logs: `journalctl -u hestia-kiosk -f`.
+#### Was beim Boot passiert
 
-**Was die Kiosk-Konfig macht:**
-- `cage -s` — Wayland-Kiosk, ein Programm fullscreen, kein Compositor-Chrome
-- `--use-fake-ui-for-media-stream` — Kamera-Permission automatisch erteilt
-  (für die Wand-Erkennung)
-- `--autoplay-policy=no-user-gesture-required` — Face-API-Video-Stream
-  darf ohne Click starten
-- Crash-Marker im Chromium-Profil wird beim Start zurückgesetzt, sodass
-  nach einem Stromausfall kein "Restore session"-Popup hängenbleibt
-- `useWallScreensaver` im Frontend dimmt den Bildschirm bei Inaktivität;
-  hier explizit kein OS-Bildschirmschoner aktiv, damit PIR-Wakeup über
-  Socket.io das einzige Wake-Signal bleibt
+1. systemd kommt bis `multi-user.target` hoch (~10 s nach Power-On)
+2. `seatd.service` läuft, vermittelt GPU-Zugriff
+3. `hestia-kiosk.service` greift sich tty1
+4. `cage -s` startet, übernimmt den Framebuffer
+5. `hestia-kiosk.sh` startet `chromium --kiosk` mit allen passenden Flags
+6. Du siehst direkt `https://hestia.local/wall` — kein Login, kein Logo,
+   nichts dazwischen
 
-**Bei Desktop-Variante (RPi OS mit Bullseye/Bookworm Desktop):** statt
-`hestia-kiosk.service` kann auch eine `~/.config/autostart/hestia.desktop`
-mit demselben `hestia-kiosk.sh`-Aufruf verwendet werden.
+#### Welche Chromium-Flags wir setzen (und warum)
+
+`hestia-kiosk.sh` ruft Chromium mit folgenden Optionen auf:
+
+| Flag | Zweck |
+|------|-------|
+| `--kiosk` | Vollbild, keine Tabs, kein Menü |
+| `--ozone-platform=wayland` | Direkt Wayland-Client, kein X-Wrapper |
+| `--noerrdialogs` | Kein "Aw, Snap!"-Dialog nach Crash |
+| `--disable-infobars --disable-translate` | Keine Banner verdecken die UI |
+| `--autoplay-policy=no-user-gesture-required` | Video-Stream der Gesichtserkennung darf ohne Touch starten |
+| `--use-fake-ui-for-media-stream` | Kamera-Permission automatisch erteilt (sonst Dialog) |
+| `--no-first-run --check-for-update-interval=...` | Kein "Willkommen", kein Update-Popup |
+| `--user-data-dir=...` | Eigenes Profil, getrennt vom Default — sorgt zusätzlich dafür, dass der "Restore session?"-Hinweis nach Stromausfall sauber zurückgesetzt werden kann |
+
+Außerdem setzt das Skript vor dem Start den Crash-Marker im Profil
+zurück (`"exit_type":"Crashed" → "Normal"`), damit nach einem Stromausfall
+nicht die orange "Wiederherstellen"-Leiste hängenbleibt.
+
+#### Bildschirm-Aus / Dimmen
+
+Wir aktivieren **bewusst keinen** OS-Bildschirmschoner. Das macht der
+Frontend-Code: `useWallScreensaver` blendet nach konfigurierbarer Idle-
+Zeit ein schwarzes Overlay ein und stoppt zusätzlich die Kamera. Geweckt
+wird über:
+
+- **PIR-Sensor** (siehe weiter unten) — sendet `motion-detected` per
+  Socket.io, Frontend deckt das Overlay sofort wieder ab
+- **Touch / Maus / Tastatur** auf dem Display selbst
+
+So bleibt der einzige Wake-Pfad in der App-Logik, nicht in der OS-
+Konfiguration — kein Konflikt zwischen `xset dpms`, `setterm` und
+Browser-Verhalten.
+
+#### Debugging und Wartung
+
+Während Kiosk läuft, ist tty1 vom Display belegt. Du arbeitest stattdessen
+über SSH:
+
+```bash
+# Logs des Kiosks
+journalctl -u hestia-kiosk -f
+
+# Kiosk vorübergehend anhalten (zeigt Login-Prompt auf tty1)
+sudo systemctl stop hestia-kiosk
+
+# Wieder starten
+sudo systemctl start hestia-kiosk
+
+# Komplett deaktivieren (überlebt Reboot)
+sudo systemctl disable --now hestia-kiosk
+```
+
+URL ändern, ohne die Unit zu editieren:
+```bash
+sudo systemctl edit hestia-kiosk
+# In den Override-Block einfügen:
+#   [Service]
+#   Environment=HESTIA_WALL_URL=http://192.168.1.100/wall
+sudo systemctl restart hestia-kiosk
+```
+
+#### Wenn du doch RPi OS mit Desktop fährst
+
+Statt `hestia-kiosk.service` reicht eine Autostart-Datei, die das gleiche
+Skript aufruft:
+
+```bash
+mkdir -p ~/.config/autostart
+cat > ~/.config/autostart/hestia-kiosk.desktop <<'EOF'
+[Desktop Entry]
+Type=Application
+Name=Hestia Wall
+Exec=/home/pi/hestia/scripts/hestia-kiosk.sh
+X-GNOME-Autostart-enabled=true
+EOF
+```
+
+Beim Login startet dann Chromium im Kiosk-Modus innerhalb der Desktop-
+Session.
 
 ### Wand-Erkennung (optional)
 
