@@ -5,6 +5,19 @@ set -euo pipefail
 
 URL="${HESTIA_WALL_URL:-https://hestia.local/wall}"
 
+# Auto-Login: Wenn HESTIA_KIOSK_EMAIL + HESTIA_KIOSK_PASSWORD gesetzt sind
+# (üblicherweise via EnvironmentFile= in der systemd-Unit), einen frischen
+# JWT holen und an die URL als #token=... anhängen. main.tsx im Frontend
+# liest den Hash, schreibt ihn in localStorage und säubert die URL.
+# Schlägt der Login fehl (Backend nicht erreichbar, falsche Credentials),
+# läuft der Kiosk trotzdem weiter — dann zeigt er halt /login.
+if [[ -n "${HESTIA_KIOSK_EMAIL:-}" && -n "${HESTIA_KIOSK_PASSWORD:-}" ]]; then
+  LOGIN_SCRIPT="$(dirname "$0")/hestia-kiosk-login.sh"
+  if TOKEN=$("$LOGIN_SCRIPT" 2>/tmp/hestia-kiosk-login.log); then
+    URL="${URL}#token=${TOKEN}"
+  fi
+fi
+
 # Chromium-Profilordner separat halten, damit kein "Restore session"-Popup
 # nach Crash/Reboot erscheint und Cache größenbegrenzt bleibt.
 PROFILE_DIR="${HOME}/.config/hestia-kiosk-chromium"

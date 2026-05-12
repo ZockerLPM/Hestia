@@ -473,7 +473,14 @@ curl -L https://github.com/FiloSottile/mkcert/releases/latest/download/mkcert-v1
 chmod +x ~/mkcert
 sudo mv ~/mkcert /usr/local/bin/mkcert
 
-mkcert -install      # CA-Root installieren
+# WICHTIG für Chromium im Kiosk-Mode: NSS-Trust-Store des Users vor
+# `mkcert -install` anlegen, sonst trägt mkcert die CA dort nicht ein
+# und Chromium zeigt "your connection is not private" trotz
+# installiertem System-Cert.
+mkdir -p ~/.pki/nssdb
+certutil -d sql:$HOME/.pki/nssdb -N --empty-password
+
+mkcert -install      # CA-Root in System + NSS installieren
 
 mkdir -p ~/hestia/caddy/certs
 cd ~/hestia/caddy/certs
@@ -487,6 +494,10 @@ mkcert hestia.local "*.hestia.local" 192.168.1.100 localhost
 # Umbenennen für Caddy
 mv hestia.local+3.pem hestia.crt
 mv hestia.local+3-key.pem hestia.key
+
+# Verifizieren, dass die CA überall ist:
+certutil -d sql:$HOME/.pki/nssdb -L | grep mkcert
+# → Eine Zeile mit "mkcert ... CT,c,c" zeigt, dass Chromium die CA trauen wird
 ```
 
 Die `rootCA.pem` ist das, was du auf jedem Client installierst. Pfad
@@ -501,6 +512,14 @@ mkcert -CAROOT
 
 ```bash
 cat > ~/hestia/caddy/Caddyfile <<'EOF'
+{
+    # Wenn ein Client per IP-Adresse zugreift (z.B. https://192.168.1.100),
+    # schickt er kein gültiges SNI (RFC erlaubt da nur DNS-Namen). Ohne
+    # default_sni würde Caddy mit `tlsv1 alert internal_error` antworten.
+    # Mit dieser Zeile fällt Caddy auf das hestia.local-Cert zurück.
+    default_sni hestia.local
+}
+
 hestia.local, 192.168.1.100 {
     tls /certs/hestia.crt /certs/hestia.key
 
@@ -853,6 +872,57 @@ sudo systemctl edit hestia-kiosk
 sudo systemctl restart hestia-kiosk
 ```
 
+#### Auto-Login auf der Wand
+
+Das Wand-Display soll natürlich nicht jedes Mal ein Login-Formular zeigen,
+sondern direkt die `/wall`-Oberfläche. Hestia nutzt JWT in `localStorage`
+mit 30 Tagen Gültigkeit. Zwei Optionen:
+
+**Variante A — Einmaliger manueller Login (einfach)**
+
+Beim allerersten Start des Kiosks einmal mit USB-Tastatur (oder VNC, oder
+Login von einem anderen Gerät im selben Chromium-Profil) einloggen. Der
+Token bleibt 30 Tage erhalten, weil `--user-data-dir` das Profil
+persistiert. Nach 30 Tagen erneuter Login nötig.
+
+**Variante B — Auto-Login per Helper-Script (für reine Touchscreen-Wand)**
+
+Im Repo ab Mai 2026 liegt `scripts/hestia-kiosk-login.sh`, das beim
+Kiosk-Start einen frischen JWT via API holt und Chromium mit dem Token
+als URL-Hash öffnet. Das Frontend (`main.tsx`) liest den Hash, schreibt
+den Token in localStorage und säubert die URL sofort.
+
+Setup:
+```bash
+# 1. Credentials-Datei anlegen (chmod 600 ist Pflicht!)
+cat > ~/.hestia-kiosk.env <<'EOF'
+HESTIA_KIOSK_EMAIL=wand@hestia.local
+HESTIA_KIOSK_PASSWORD=dein-passwort
+EOF
+chmod 600 ~/.hestia-kiosk.env
+
+# 2. Empfohlen: einen eigenen Hestia-User für die Wand anlegen statt einen
+#    persönlichen Login zu verwenden. Login als Admin auf einem regulären
+#    Gerät → Profil → neuen User "Wand" mit eigenem Passwort
+#    (oder per `npm run db:seed` einen weiteren seedusers ergänzen).
+
+# 3. Kiosk neu starten — die systemd-Unit lädt ~/.hestia-kiosk.env
+#    via EnvironmentFile=- automatisch
+sudo systemctl restart hestia-kiosk
+
+# 4. Verifizieren: nach 2-3 Sekunden sollte direkt die /wall-Seite
+#    angezeigt werden, nicht /login. Wenn nicht:
+cat /tmp/hestia-kiosk-login.log
+# Hier steht, warum der Login-Request scheitert (Backend down, falsche
+# Credentials, DNS-Auflösung von hestia.local kaputt, ...).
+```
+
+**Warum nicht einfach Credentials in die Chromium-Adressleiste schreiben?**
+JWT in URL-Query wäre in Caddy-Logs und Browser-History sichtbar. Hash
+(`#token=...`) wird vom Browser nie zum Server gesendet und nicht in
+Referer-Headern weitergeleitet. Nach `history.replaceState` ist er nur
+für Millisekunden in der Adressleiste sichtbar.
+
 #### Wenn du doch RPi OS mit Desktop fährst
 
 Statt `hestia-kiosk.service` reicht eine Autostart-Datei, die das gleiche
@@ -1052,10 +1122,105 @@ Requests im Network-Tab erscheinen, prüfe ob das Frontend mit
 `baseURL: '/api'` (relativ!) konfiguriert ist. Das ist Standard in
 `api/client.ts`.
 
-### "ERR_CERT_AUTHORITY_INVALID"
+### "ERR_CERT_AUTHORITY_INVALID" / "Your connection is not private"
 
-Die mkcert-Root-CA ist auf dem Client nicht installiert. Siehe
-Schritt 12.
+**Allgemein**: Die mkcert-Root-CA ist auf dem Client nicht installiert.
+Siehe Schritt 12 für die jeweilige Plattform.
+
+**Speziell — Chromium im Kiosk-Mode auf dem RPi selbst**: Chromium nutzt
+einen eigenen NSS-Trust-Store unter `~/.pki/nssdb`. mkcert muss diesen
+Store kennen, **bevor** `-install` ausgeführt wird. Fix:
+
+```bash
+mkdir -p ~/.pki/nssdb
+certutil -d sql:$HOME/.pki/nssdb -N --empty-password
+mkcert -install
+sudo systemctl restart hestia-kiosk
+```
+
+Verifizieren mit `certutil -d sql:$HOME/.pki/nssdb -L | grep mkcert` —
+muss eine Zeile mit `mkcert ... CT,c,c` zeigen.
+
+### Kiosk-Service stirbt sofort mit Exit 1: "Failed to spawn client: Permission denied"
+
+Symptom: `journalctl -u hestia-kiosk` zeigt nur "session opened" und dann
+Exit-Code 1. Im Debug-Modus (`/tmp/cage.log`) steht:
+```
+[ERROR] [../cage.c:138] Failed to spawn client: Permission denied
+```
+
+Ursache: Das Shell-Skript `scripts/hestia-kiosk.sh` hat CRLF-Zeilenenden
+(typisch wenn das Repo von Windows ohne `.gitattributes` geholt wurde).
+Der Kernel versucht dann den Interpreter `/usr/bin/env bash\r` (mit
+Carriage Return) zu finden, scheitert und wirft Permission-denied.
+
+Fix:
+```bash
+sudo apt install -y dos2unix
+dos2unix ~/hestia/scripts/hestia-kiosk.sh ~/hestia/scripts/pir-motion.py
+sudo systemctl restart hestia-kiosk
+```
+
+Im Repo ist ab Mai 2026 eine `.gitattributes` enthalten, die LF für
+`.sh`/`.service`/`.py`/`Dockerfile` erzwingt. Bei älteren Klones einmalig
+`git rm --cached -r . && git reset --hard` ausführen, um die Zeilenenden
+zu normalisieren.
+
+### cage stirbt silent auf DSI-Display: "Failed to parse EDID"
+
+Auf RPi 4/5 mit DSI-Display (Raspberry Pi Touch Display etc.) sitzt die
+Display-fähige DRM-Karte oft auf `/dev/dri/card1`, nicht card0. cage
+nimmt aber standardmäßig card0 (= die v3d-3D-Engine ohne Connector) und
+bricht ab.
+
+Check:
+```bash
+for f in /sys/class/drm/card*-*/status; do echo "$f: $(cat $f)"; done
+# Wenn dort z.B. card1-DSI-1: connected steht → cage muss auf card1
+```
+
+Fix als Service-Override:
+```bash
+sudo systemctl edit hestia-kiosk
+```
+```ini
+[Service]
+Environment=XDG_RUNTIME_DIR=/run/user/1000
+Environment=WLR_DRM_DEVICES=/dev/dri/card1
+```
+```bash
+sudo loginctl enable-linger fabi      # XDG_RUNTIME_DIR persistent halten
+sudo systemctl daemon-reload
+sudo systemctl restart hestia-kiosk
+```
+
+Die `Failed to parse EDID`-Meldung darüber ist eine harmlose Warning —
+DSI-Panels haben in der Regel kein EDID-Datenpaket. Solange das echte
+`Failed to spawn client`/`Permission denied` weg ist, läuft cage.
+
+### "ERR_SSL_PROTOCOL_ERROR" / "tlsv1 alert internal error" bei Zugriff über IP
+
+Symptom: `https://hestia.local` funktioniert sauber, `https://192.168.1.100`
+liefert "Diese Website kann keine sichere Verbindung bereitstellen".
+`curl -k https://192.168.1.100/api/health` zeigt:
+```
+TLS connect error: error:0A000438:SSL routines::tlsv1 alert internal error
+```
+
+Ursache: Wenn ein Client per IP zugreift, schickt er kein gültiges
+SNI (RFC erlaubt da nur DNS-Namen). Caddy weiß dann nicht, welches
+Cert es ausspielen soll, und bricht mit `internal_error` ab.
+
+Fix: in der Caddyfile `default_sni hestia.local` in den globalen
+Optionen setzen (ab Mai 2026 im Template). Dann reload:
+
+```bash
+docker compose -f docker-compose.prod.yml exec caddy \
+  caddy reload --config /etc/caddy/Caddyfile
+```
+
+Alternativ: Clients über `hestia.local` zugreifen lassen, nicht über
+die IP. Voraussetzung dafür ist mDNS oder Hosts-Eintrag (Schritt 12).
 
 ### Push funktioniert nicht
 
