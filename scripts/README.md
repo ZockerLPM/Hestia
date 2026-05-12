@@ -19,6 +19,23 @@ Voraussetzung: RPi OS Lite eingerichtet, Docker-Stack läuft, Hestia ist
 unter `https://hestia.local` erreichbar (siehe Schritte 1–13 in
 DEPLOYMENT-RPI.md).
 
+### 0. Execute-Bit prüfen (zwingend nach jedem Sync von Windows!)
+
+```bash
+chmod +x ~/hestia/scripts/*.sh ~/hestia/scripts/*.py
+```
+
+Sync von Windows (SCP/rsync/Imager-USB) verliert das Linux-execute-Bit,
+weil NTFS keine POSIX-Permissions kennt. Symptome ohne diesen Schritt:
+- `cage`: `Failed to spawn client: Permission denied`
+- `python3`: `cannot execute: ...`
+
+Die mitgelieferten systemd-Units (`hestia-kiosk.service`,
+`hestia-pir.service`) ziehen das execute-Bit zusätzlich als
+`ExecStartPre=-chmod +x …` selbst nach — also auch wenn du den Schritt
+vergisst, läuft der Service. Manuell nachziehen ist trotzdem sauberer
+und vermeidet eine Fehlersuche-Schleife.
+
 ### 1. PIR-Sensor (optional, falls HC-SR501 angeschlossen)
 
 ```bash

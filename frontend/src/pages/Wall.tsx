@@ -138,7 +138,7 @@ export default function Wall() {
   }
 
   return (
-    <div className="min-h-screen text-gray-100 p-6" style={{ backgroundColor: bgColor }}>
+    <div className="min-h-screen text-gray-100 p-2 sm:p-3 xl:p-6" style={{ backgroundColor: bgColor }}>
 
       {/* Screensaver overlay */}
       {screensaver.isScreensaverActive && (
@@ -152,58 +152,59 @@ export default function Wall() {
       {/* Mood check-in (once per day, dismissible) */}
       <MoodCheckIn />
 
-      {/* HEADER */}
-      <div className="flex items-end justify-between mb-6">
-        <div>
-          <div className="text-7xl lg:text-8xl font-bold tabular-nums tracking-tight">
+      {/* HEADER — kompakt auf 800x480, bei xl/2xl-Screens groß und prominent */}
+      <div className="flex items-end justify-between mb-2 sm:mb-3 xl:mb-6 gap-2">
+        <div className="min-w-0">
+          <div className="text-3xl sm:text-5xl lg:text-7xl xl:text-8xl font-bold tabular-nums tracking-tight leading-none">
             {format(now, showSec ? 'HH:mm:ss' : 'HH:mm')}
           </div>
-          <div className="text-xl lg:text-2xl text-gray-400 mt-2">
+          <div className="text-xs sm:text-base lg:text-xl xl:text-2xl text-gray-400 mt-1 xl:mt-2 truncate">
             {format(now, 'EEEE, d. MMMM yyyy', { locale: de })}
           </div>
         </div>
 
-        <div className="flex gap-2">
+        <div className="flex gap-1 sm:gap-2 shrink-0">
           <button
             onClick={() => setShowPantryEntry(true)}
-            className="bg-primary-500 hover:bg-primary-600 text-white px-5 py-3 rounded-xl text-lg font-semibold flex items-center gap-2"
+            className="bg-primary-500 hover:bg-primary-600 text-white px-2.5 py-2 xl:px-5 xl:py-3 rounded-lg xl:rounded-xl text-xs sm:text-sm xl:text-lg font-semibold flex items-center gap-1.5 xl:gap-2"
           >
-            <Package className="w-5 h-5" /> Einkauf eintragen
+            <Package className="w-4 h-4 xl:w-5 xl:h-5" />
+            <span className="hidden sm:inline">Einkauf eintragen</span>
           </button>
 
           <button
             onClick={() => setShowConfig(true)}
             title="Dashboard anpassen"
-            className="bg-gray-800 hover:bg-gray-700 text-gray-300 px-4 py-3 rounded-xl flex items-center gap-2"
+            className="bg-gray-800 hover:bg-gray-700 text-gray-300 px-2.5 py-2 xl:px-4 xl:py-3 rounded-lg xl:rounded-xl flex items-center"
           >
-            <SlidersHorizontal className="w-5 h-5" />
+            <SlidersHorizontal className="w-4 h-4 xl:w-5 xl:h-5" />
           </button>
 
           <button
             onClick={toggleFace}
             title={faceEnabled ? 'Gesichtserkennung deaktivieren' : 'Gesichtserkennung aktivieren'}
-            className={`px-4 py-3 rounded-xl flex items-center gap-2 ${
+            className={`px-2.5 py-2 xl:px-4 xl:py-3 rounded-lg xl:rounded-xl flex items-center ${
               faceEnabled ? 'bg-gray-800 text-gray-200' : 'bg-gray-900 text-gray-500'
             }`}
           >
-            {faceEnabled ? <Eye className="w-5 h-5" /> : <EyeOff className="w-5 h-5" />}
+            {faceEnabled ? <Eye className="w-4 h-4 xl:w-5 xl:h-5" /> : <EyeOff className="w-4 h-4 xl:w-5 xl:h-5" />}
           </button>
 
           {face.recognizedUser && (
             <button
               onClick={face.forget}
               title="Generisches Interface anzeigen"
-              className="bg-gray-800 hover:bg-gray-700 text-gray-300 px-4 py-3 rounded-xl flex items-center gap-2"
+              className="bg-gray-800 hover:bg-gray-700 text-gray-300 px-2.5 py-2 xl:px-4 xl:py-3 rounded-lg xl:rounded-xl flex items-center"
             >
-              <UserIcon className="w-5 h-5" />
+              <UserIcon className="w-4 h-4 xl:w-5 xl:h-5" />
             </button>
           )}
 
           <Link
             to="/"
-            className="bg-gray-800 hover:bg-gray-700 text-gray-300 px-4 py-3 rounded-xl flex items-center gap-2"
+            className="bg-gray-800 hover:bg-gray-700 text-gray-300 px-2.5 py-2 xl:px-4 xl:py-3 rounded-lg xl:rounded-xl flex items-center"
           >
-            <Settings className="w-5 h-5" />
+            <Settings className="w-4 h-4 xl:w-5 xl:h-5" />
           </Link>
         </div>
       </div>
@@ -236,8 +237,8 @@ export default function Wall() {
       )}
 
       {/* GRID — optional PersonalPanel on the left */}
-      <div className={`grid gap-4 ${
-        face.recognizedUser ? 'grid-cols-1 lg:grid-cols-[340px_1fr]' : 'grid-cols-1'
+      <div className={`grid gap-2 sm:gap-3 xl:gap-4 ${
+        face.recognizedUser ? 'grid-cols-1 xl:grid-cols-[340px_1fr]' : 'grid-cols-1'
       }`}>
         {face.recognizedUser && (
           <PersonalPanel
@@ -247,7 +248,9 @@ export default function Wall() {
           />
         )}
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        {/* Auf 800x480 (md) eine Spalte, ab sm zwei, ab xl drei — passt
+            für 7"-Touch-Displays ohne die Karten zu eng zu quetschen. */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-2 sm:gap-3 xl:gap-4">
           {activeCards.map((cfg) =>
             renderCard(cfg.id as WallCardId, cfg.wide ?? false),
           )}

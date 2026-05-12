@@ -245,6 +245,25 @@ rsync -avz --exclude node_modules --exclude .git \
 > Empfehlung: auch bei lokalem Code mindestens ein lokales Git-Repo
 > anlegen, damit du in Schritt 16 (Updates) `git pull` benutzen kannst.
 
+### Wichtig: execute-Bit auf Shell-Skripten
+
+Sync von Windows verliert oft das execute-Bit, weil NTFS keine POSIX-
+Permissions kennt. Direkt nach dem Sync (oder nach jedem `git pull`, falls
+core.fileMode anders konfiguriert ist) auf dem RPi:
+
+```bash
+chmod +x ~/hestia/scripts/*.sh ~/hestia/scripts/*.py
+ls -la ~/hestia/scripts/
+# Erwartet: -rwxrwxr-x bei den .sh/.py-Dateien
+```
+
+Die mitgelieferten systemd-Units (`hestia-kiosk.service`, `hestia-pir.service`)
+ziehen das execute-Bit zusätzlich als `ExecStartPre=-chmod +x …` vor jedem
+Start nach, sodass ein vergessener `chmod` den Service nicht killt. Trotzdem
+hilft der manuelle Schritt direkt nach dem Sync — sonst stirbt der erste
+Start im PIR-Setup mit unklarem Fehler, bevor die Unit überhaupt installiert
+ist.
+
 ## Schritt 5 — Production-Compose erstellen
 
 Im Repo gibt es ein `docker-compose.yml` für lokale Entwicklung. Für

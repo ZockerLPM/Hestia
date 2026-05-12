@@ -12,6 +12,11 @@ Type=simple
 # Systeme verwenden heute einen eigenen Namen.
 User=pi
 WorkingDirectory=%h/hestia
+
+# Selbst-heilendes execute-Bit (siehe hestia-kiosk.service für die ausführliche
+# Erklärung). `-` macht den Aufruf failsoft.
+ExecStartPre=-/bin/chmod +x %h/hestia/scripts/pir-motion.py
+
 ExecStart=/usr/bin/python3 %h/hestia/scripts/pir-motion.py
 Environment=HESTIA_PIR_GPIO=17
 Environment=HESTIA_MOTION_URL=http://localhost:3001/api/internal/motion

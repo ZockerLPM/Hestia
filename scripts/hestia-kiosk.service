@@ -23,6 +23,14 @@ StandardInput=tty
 StandardOutput=journal
 StandardError=journal
 
+# Selbst-heilendes execute-Bit: Wenn das Repo via SCP/rsync von Windows
+# auf den RPi gekommen ist, gehen file modes häufig verloren — die
+# Skripte landen mit 0644 (no-exec), cage stirbt dann mit "Failed to
+# spawn client: Permission denied". Mit `chmod +x` als ExecStartPre
+# bügeln wir das vor jedem Start aus. `-` macht den Aufruf failsoft —
+# wenn die Datei fehlt, kein Service-Abort.
+ExecStartPre=-/bin/chmod +x %h/hestia/scripts/hestia-kiosk.sh %h/hestia/scripts/hestia-kiosk-login.sh
+
 # Cage = minimaler Wayland-Kiosk-Compositor, startet genau ein Programm fullscreen.
 # Bildschirmschoner deaktivieren wir bewusst nicht hier — useWallScreensaver
 # im Frontend übernimmt das (dimmt zu schwarz, weckt auf bei PIR/Touch).
