@@ -1,0 +1,20 @@
+[Unit]
+Description=Hestia PIR motion sensor bridge
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Pfade ggf. anpassen; %h ist das HOME des Users unten.
+User=pi
+WorkingDirectory=%h/hestia
+ExecStart=/usr/bin/python3 %h/hestia/scripts/pir-motion.py
+Environment=HESTIA_PIR_GPIO=17
+Environment=HESTIA_MOTION_URL=http://localhost:3001/api/internal/motion
+# Wenn MOTION_SECRET in der Backend-.env gesetzt ist, hier identisch eintragen:
+# Environment=HESTIA_MOTION_SECRET=dein-secret
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

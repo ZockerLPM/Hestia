@@ -9,6 +9,18 @@ services:
       - DATABASE_URL=file:/app/data/hestia.db
       - JWT_SECRET=${JWT_SECRET:-hestia-secret-change-in-production}
       - NODE_ENV=production
+      # Optionale Secrets (leer = Feature aus)
+      - MOTION_SECRET=${MOTION_SECRET:-}
+      - TOMTOM_API_KEY=${TOMTOM_API_KEY:-}
+      - VAPID_PUBLIC_KEY=${VAPID_PUBLIC_KEY:-}
+      - VAPID_PRIVATE_KEY=${VAPID_PRIVATE_KEY:-}
+      - VAPID_SUBJECT=${VAPID_SUBJECT:-mailto:hestia@example.com}
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3001/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
     restart: unless-stopped
 
   frontend:
@@ -16,7 +28,8 @@ services:
     ports:
       - "3000:80"
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     restart: unless-stopped
 
 volumes:

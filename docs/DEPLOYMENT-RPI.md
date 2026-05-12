@@ -151,6 +151,7 @@ services:
       - VAPID_PRIVATE_KEY=${VAPID_PRIVATE_KEY}
       - VAPID_SUBJECT=${VAPID_SUBJECT}
       - TOMTOM_API_KEY=${TOMTOM_API_KEY:-}
+      - MOTION_SECRET=${MOTION_SECRET:-}
       - NODE_ENV=production
       - TZ=Europe/Berlin
     volumes:
@@ -275,6 +276,10 @@ VAPID_SUBJECT=mailto:du@example.com
 # Optional: TomTom-Key für Stau-Anzeige im Wand-Modus
 # Free Tier 2500 calls/day; ohne Key wird Verkehr-Card ausgeblendet
 TOMTOM_API_KEY=
+
+# Optional: Shared Secret für den PIR-Sensor (siehe Schritt 14, PIR-Abschnitt).
+# Leer lassen, wenn das Backend nur loopback erreichbar ist.
+MOTION_SECRET=
 EOF
 
 chmod 600 ~/hestia/.env
@@ -484,28 +489,47 @@ USB-Scanner/Kamera und Touch-MHD-Räder — alles ohne Modulwechsel.
 
 ### Variante B — RPi mit angeschlossenem Touchscreen (empfohlen)
 
-Wenn du den RPi selbst als Wandtablet nutzt:
+Der Repo-Stand liefert ein fertiges Kiosk-Setup für **RPi OS Lite** (ohne
+Desktop-Environment) mit dem minimalen Wayland-Kiosk-Compositor `cage` —
+kein Login-Manager, kein Window-Manager-Overhead, ~30 MB RAM idle.
 
 ```bash
-sudo apt install -y chromium-browser unclutter
-mkdir -p ~/.config/autostart
-cat > ~/.config/autostart/hestia.desktop <<'EOF'
-[Desktop Entry]
-Type=Application
-Name=Hestia Wall
-Exec=chromium-browser --kiosk --noerrdialogs --disable-infobars \
-  --use-fake-ui-for-media-stream \
-  --autoplay-policy=no-user-gesture-required \
-  https://hestia.local/wall
-X-GNOME-Autostart-enabled=true
-EOF
+sudo apt install -y cage chromium seatd
+sudo systemctl enable --now seatd
+sudo usermod -aG video,input,seat,render,tty pi   # User ggf. anpassen
+
+# tty1 darf nicht von getty belegt sein, sonst kollidiert cage damit:
+sudo systemctl disable --now getty@tty1.service
+
+# Service + Launcher installieren (Repo-Pfade)
+sudo cp ~/hestia/scripts/hestia-kiosk.service /etc/systemd/system/
+chmod +x ~/hestia/scripts/hestia-kiosk.sh
+
+# Falls der User nicht 'pi' heißt: User= und HOME-Pfad in der Unit anpassen.
+sudoedit /etc/systemd/system/hestia-kiosk.service
+
+sudo systemctl daemon-reload
+sudo systemctl enable --now hestia-kiosk.service
 ```
 
-`unclutter` blendet den Mauszeiger aus. Die Flags:
-- `--use-fake-ui-for-media-stream` — erteilt Kamera-Permission automatisch
+Beim nächsten Boot startet automatisch Chromium auf
+`https://hestia.local/wall` im Vollbild. Logs: `journalctl -u hestia-kiosk -f`.
+
+**Was die Kiosk-Konfig macht:**
+- `cage -s` — Wayland-Kiosk, ein Programm fullscreen, kein Compositor-Chrome
+- `--use-fake-ui-for-media-stream` — Kamera-Permission automatisch erteilt
   (für die Wand-Erkennung)
-- `--autoplay-policy=no-user-gesture-required` — Video-Stream darf ohne
-  Click starten
+- `--autoplay-policy=no-user-gesture-required` — Face-API-Video-Stream
+  darf ohne Click starten
+- Crash-Marker im Chromium-Profil wird beim Start zurückgesetzt, sodass
+  nach einem Stromausfall kein "Restore session"-Popup hängenbleibt
+- `useWallScreensaver` im Frontend dimmt den Bildschirm bei Inaktivität;
+  hier explizit kein OS-Bildschirmschoner aktiv, damit PIR-Wakeup über
+  Socket.io das einzige Wake-Signal bleibt
+
+**Bei Desktop-Variante (RPi OS mit Bullseye/Bookworm Desktop):** statt
+`hestia-kiosk.service` kann auch eine `~/.config/autostart/hestia.desktop`
+mit demselben `hestia-kiosk.sh`-Aufruf verwendet werden.
 
 ### Wand-Erkennung (optional)
 
@@ -538,63 +562,51 @@ verbrauchen.
 
 **Verkabelung HC-SR501:**
 ```
-VCC  → Pin 2 (5V)
-OUT  → Pin 11 (GPIO 17)
+VCC  → Pin 2  (5V)
+OUT  → Pin 11 (GPIO 17, BCM)
 GND  → Pin 6
 ```
 
-**Python-Script** (`~/hestia/pir_motion.py`):
-```python
-#!/usr/bin/env python3
-import RPi.GPIO as GPIO
-import requests
-import time
+**Installation** — Repo liefert Skript und systemd-Unit unter `scripts/`:
 
-GPIO.setmode(GPIO.BCM)
-GPIO.setup(17, GPIO.IN)
-
-SECRET = "dein-secret"  # aus MOTION_SECRET in .env
-
-while True:
-    if GPIO.input(17):
-        try:
-            requests.post(
-                "http://localhost:3001/api/internal/motion",
-                headers={"x-motion-secret": SECRET},
-                timeout=1
-            )
-        except Exception:
-            pass
-        time.sleep(5)  # 5s cooldown
-    time.sleep(0.2)
-```
-
-**Als systemd-Service einrichten:**
 ```bash
-sudo nano /etc/systemd/system/hestia-pir.service
-```
-```ini
-[Unit]
-Description=Hestia PIR Motion Sensor
-After=network.target
+sudo apt install -y python3-gpiozero python3-requests
 
-[Service]
-ExecStart=/usr/bin/python3 /home/pi/hestia/pir_motion.py
-Restart=always
-User=pi
+sudo cp ~/hestia/scripts/hestia-pir.service /etc/systemd/system/
+# User= und HOME-Pfad in der Unit anpassen, falls nicht 'pi':
+sudoedit /etc/systemd/system/hestia-pir.service
 
-[Install]
-WantedBy=multi-user.target
+sudo systemctl daemon-reload
+sudo systemctl enable --now hestia-pir.service
 ```
+
+Das Skript [`scripts/pir-motion.py`](../scripts/pir-motion.py) nutzt
+`gpiozero` (event-getrieben statt Polling, läuft auch auf RPi 5) und
+respektiert ein Cooldown-Fenster, damit der HC-SR501 nicht jede Bewegung
+einzeln meldet.
+
+**Konfigurierbar über Environment-Variablen** in der Unit-Datei:
+- `HESTIA_PIR_GPIO` — BCM-Pin (Default 17)
+- `HESTIA_MOTION_URL` — Backend-Endpoint (Default loopback)
+- `HESTIA_MOTION_SECRET` — muss mit `MOTION_SECRET` in der `.env` matchen
+- `HESTIA_MOTION_COOLDOWN` — Sekunden zwischen aufeinanderfolgenden Posts
+  (Default 5)
+
+**`MOTION_SECRET` in `.env` setzen** (optional, empfohlen wenn Backend
+nicht nur loopback erreichbar ist):
+```
+MOTION_SECRET=<openssl rand -hex 16>
+```
+Den selben Wert in der Service-Unit als `HESTIA_MOTION_SECRET` eintragen.
+Ohne Secret erlaubt das Backend POST ohne Header.
+
+**Test:**
 ```bash
-sudo systemctl enable --now hestia-pir
+# Manuell triggern, sollte 'motion-detected' auf der Wand auslösen:
+curl -X POST http://localhost:3001/api/internal/motion \
+  -H "x-motion-secret: $MOTION_SECRET"
+# → {"ok":true}
 ```
-
-**Optional — `MOTION_SECRET` in `.env` setzen:**
-```
-MOTION_SECRET=dein-geheimes-secret
-```
-Ohne Secret ist der Endpoint loopback-only zugänglich (nur RPi selbst kann POST).
 
 ### Persönliche Daten konfigurieren
 

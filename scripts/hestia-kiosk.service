@@ -1,0 +1,25 @@
+[Unit]
+Description=Hestia Wall Display (Chromium kiosk via cage)
+After=network-online.target hestia-pir.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+PAMName=login
+TTYPath=/dev/tty1
+StandardInput=tty
+StandardOutput=journal
+StandardError=journal
+# Cage = minimaler Wayland-Kiosk-Compositor, startet genau ein Programm fullscreen.
+# Bildschirmschoner deaktivieren wir bewusst nicht hier — useWallScreensaver
+# im Frontend übernimmt das (dimmt zu schwarz, weckt auf bei PIR/Touch).
+ExecStart=/usr/bin/cage -s -- %h/hestia/scripts/hestia-kiosk.sh
+Environment=HESTIA_WALL_URL=https://hestia.local/wall
+Restart=always
+RestartSec=3
+# Wenn der RPi nichts anderes auf tty1 zeigen soll:
+# Stelle sicher, dass getty@tty1 deaktiviert ist (siehe DEPLOYMENT-RPI.md).
+
+[Install]
+WantedBy=multi-user.target
