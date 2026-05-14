@@ -60,8 +60,6 @@ exec chromium \
   --check-for-update-interval=31536000 \
   --autoplay-policy=no-user-gesture-required \
   --use-fake-ui-for-media-stream \
-  --use-fake-device-for-media-stream=false \
-  --enable-features=UseOzonePlatform \
   --disk-cache-size=50000000 \
   --user-data-dir="${PROFILE_DIR}" \
   --ozone-platform=wayland \
