@@ -33,15 +33,6 @@ router.put('/me', async (req: AuthRequest, res) => {
   res.json(sanitizeUser(user));
 });
 
-// Read-only Profil eines anderen Haushaltsmitglieds (für das Wand-Display
-// mit User-Switcher, damit jeder seinen Pendelweg/Wetter sehen kann).
-// Single-Household-App: alle eingeloggten User dürfen das.
-router.get('/:userId', async (req: AuthRequest, res) => {
-  const user = await prisma.user.findUnique({ where: { id: String(req.params.userId) } });
-  if (!user) return res.status(404).json({ error: 'Not found' });
-  res.json(sanitizeUser(user));
-});
-
 // Alle Descriptors aller User — wird vom Wand-Recognizer benutzt
 router.get('/face-descriptors', async (_req, res) => {
   const list = await prisma.faceDescriptor.findMany({
@@ -79,6 +70,17 @@ router.delete('/face-descriptors/:id', async (req: AuthRequest, res) => {
   if (!d || d.userId !== req.userId) return res.status(404).json({ error: 'Not found' });
   await prisma.faceDescriptor.delete({ where: { id: d.id } });
   res.json({ success: true });
+});
+
+// Read-only Profil eines anderen Haushaltsmitglieds (für das Wand-Display
+// mit User-Switcher, damit jeder seinen Pendelweg/Wetter sehen kann).
+// Single-Household-App: alle eingeloggten User dürfen das.
+// MUSS unten stehen, sonst fängt :userId andere konkrete Routen (z.B.
+// /me und /face-descriptors).
+router.get('/:userId', async (req: AuthRequest, res) => {
+  const user = await prisma.user.findUnique({ where: { id: String(req.params.userId) } });
+  if (!user) return res.status(404).json({ error: 'Not found' });
+  res.json(sanitizeUser(user));
 });
 
 export default router;
