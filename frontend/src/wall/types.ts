@@ -23,6 +23,9 @@ export interface WallConfigShape {
   screensaverMs?: number;
   /** ms without motion before camera stream is stopped; 0 = off */
   cameraSleepMs?: number;
+  /** User-IDs, die im manuellen Wand-User-Switcher übersprungen werden
+   *  (z.B. ein Kiosk-Account ohne Profil). Default: leer = alle dabei. */
+  excludedUserIds?: string[];
 }
 
 export interface WallCardMeta {

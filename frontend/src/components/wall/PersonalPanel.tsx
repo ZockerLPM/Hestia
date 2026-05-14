@@ -19,13 +19,16 @@ interface Props {
 export default function PersonalPanel({ userId, userName, userColor }: Props) {
   const { data: profile } = useQuery<UserProfile>({
     queryKey: ['profile', userId],
-    queryFn: () => api.get('/profile/me').then((r) => r.data),
+    // /profile/:userId für beliebige Haushaltsmember (Wand-Display mit
+    // User-Switcher). /profile/me liefert in beiden Fällen das gleiche,
+    // wenn userId der eingeloggte ist.
+    queryFn: () => api.get(`/profile/${userId}`).then((r) => r.data),
     enabled: !!userId,
   });
 
   const { data: shifts = [] } = useQuery<WorkShift[]>({
     queryKey: ['shifts', userId, 'upcoming'],
-    queryFn: () => api.get('/shifts?upcoming=true').then((r) => r.data),
+    queryFn: () => api.get(`/shifts?upcoming=true&userId=${userId}`).then((r) => r.data),
     enabled: !!userId,
     refetchInterval: 5 * 60 * 1000,
   });

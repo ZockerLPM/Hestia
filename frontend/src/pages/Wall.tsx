@@ -1,9 +1,12 @@
 import { useEffect, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { de } from 'date-fns/locale';
 import { Link } from 'react-router-dom';
 import { Package, Settings, SlidersHorizontal, User as UserIcon, Eye, EyeOff } from 'lucide-react';
 
+import { api } from '../api/client';
+import type { User } from '../api/types';
 import { useWallData } from '../wall/useWallData';
 import { useWallScreensaver } from '../hooks/useWallScreensaver';
 import { useFaceRecognition } from '../hooks/useFaceRecognition';
@@ -28,15 +31,38 @@ export default function Wall() {
   const [now, setNow] = useState(new Date());
   const [showPantryEntry, setShowPantryEntry] = useState(false);
   const [showConfig, setShowConfig] = useState(false);
+  // Face-Recognition standardmäßig AUS — bei Bedarf manuell aktivieren
+  // (war früher default an, hat aber bei kaputter/fehlender Cam zu
+  // dauerhaftem "Starten…"/"Kamera-Fehler"-Status geführt).
   const [faceEnabled, setFaceEnabled] = useState(
-    () => localStorage.getItem('hestia-wall-face') !== 'off',
+    () => localStorage.getItem('hestia-wall-face') === 'on',
   );
+
+  // Manuell ausgewählter Wand-User für PersonalPanel (Touch-Switch im Header).
+  // null = kein Panel anzeigen. Wird vom Face-Recognition-Match überschrieben,
+  // wenn die Cam jemanden erkennt.
+  const [manualWallUserId, setManualWallUserId] = useState<string | null>(
+    () => localStorage.getItem('hestia-wall-user-id'),
+  );
+
+  const setManualWallUser = (id: string | null) => {
+    setManualWallUserId(id);
+    if (id) localStorage.setItem('hestia-wall-user-id', id);
+    else localStorage.removeItem('hestia-wall-user-id');
+  };
 
   const toggleFace = () => {
     const next = !faceEnabled;
     setFaceEnabled(next);
     localStorage.setItem('hestia-wall-face', next ? 'on' : 'off');
   };
+
+  // Alle Haushaltsmember für den User-Switcher
+  const { data: allUsers = [] } = useQuery<User[]>({
+    queryKey: ['users', 'household'],
+    queryFn: () => api.get('/users').then((r) => r.data),
+    staleTime: 5 * 60 * 1000,
+  });
 
   const {
     todayTasks, upcomingTasks,
@@ -82,6 +108,32 @@ export default function Wall() {
   const activeCards = [...(wallConfig.cards.length ? wallConfig.cards : [])]
     .filter((c) => c.enabled)
     .sort((a, b) => a.order - b.order);
+
+  // User-Switcher: ausgenommene User (z.B. Kiosk-Account) filtern.
+  // Reihenfolge bleibt stabil = wie vom Backend geliefert.
+  const excludedIds = new Set(wallConfig.excludedUserIds ?? []);
+  const householdUsers = allUsers.filter((u) => !excludedIds.has(u.id));
+
+  // Cycle: null (Niemand) → user[0] → user[1] → … → null
+  const cycleWallUser = () => {
+    if (householdUsers.length === 0) return;
+    const idx = manualWallUserId
+      ? householdUsers.findIndex((u) => u.id === manualWallUserId)
+      : -1;
+    const nextIdx = idx + 1;
+    if (nextIdx >= householdUsers.length) setManualWallUser(null);
+    else setManualWallUser(householdUsers[nextIdx].id);
+  };
+
+  // Wenn aktuell ausgewählter User excluded wurde → automatisch leeren
+  useEffect(() => {
+    if (manualWallUserId && excludedIds.has(manualWallUserId)) {
+      setManualWallUser(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wallConfig.excludedUserIds]);
+
+  const manualWallUser = householdUsers.find((u) => u.id === manualWallUserId) ?? null;
 
   function renderCard(id: WallCardId, wide: boolean) {
     switch (id) {
@@ -180,6 +232,31 @@ export default function Wall() {
             <SlidersHorizontal className="w-4 h-4 xl:w-5 xl:h-5" />
           </button>
 
+          {/* User-Switcher: Tap cyclet durch Haushaltsmember + "Niemand".
+              Zeigt Avatar (Initiale + Color) des aktuell ausgewählten Users
+              oder ein generisches Icon, wenn keiner gewählt ist. */}
+          <button
+            onClick={cycleWallUser}
+            title={
+              manualWallUser
+                ? `${manualWallUser.name} angezeigt — tippen für nächsten`
+                : 'Persönliches Panel anzeigen — tippen zum Auswählen'
+            }
+            className="bg-gray-800 hover:bg-gray-700 text-gray-300 px-2.5 py-2 xl:px-4 xl:py-3 rounded-lg xl:rounded-xl flex items-center"
+          >
+            {manualWallUser ? (
+              <span
+                className="w-6 h-6 xl:w-7 xl:h-7 rounded-full flex items-center justify-center text-xs xl:text-sm font-bold text-white"
+                style={{ backgroundColor: manualWallUser.color }}
+              >
+                {manualWallUser.name.charAt(0).toUpperCase()}
+              </span>
+            ) : (
+              <UserIcon className="w-4 h-4 xl:w-5 xl:h-5" />
+            )}
+          </button>
+
+          {/* Face-Recognition Toggle — nur sichtbar wenn Cam-Hardware vorhanden */}
           <button
             onClick={toggleFace}
             title={faceEnabled ? 'Gesichtserkennung deaktivieren' : 'Gesichtserkennung aktivieren'}
@@ -193,7 +270,7 @@ export default function Wall() {
           {face.recognizedUser && (
             <button
               onClick={face.forget}
-              title="Generisches Interface anzeigen"
+              title="Erkennung zurücksetzen"
               className="bg-gray-800 hover:bg-gray-700 text-gray-300 px-2.5 py-2 xl:px-4 xl:py-3 rounded-lg xl:rounded-xl flex items-center"
             >
               <UserIcon className="w-4 h-4 xl:w-5 xl:h-5" />
@@ -236,15 +313,20 @@ export default function Wall() {
         </div>
       )}
 
-      {/* GRID — optional PersonalPanel on the left */}
+      {/* GRID — optional PersonalPanel on the left.
+          Face-Recognition hat Vorrang (wenn jemand erkannt wird), sonst
+          der manuell ausgewählte Wand-User. */}
+      {(() => {
+        const panelUser = face.recognizedUser ?? manualWallUser;
+        return (
       <div className={`grid gap-2 sm:gap-3 xl:gap-4 ${
-        face.recognizedUser ? 'grid-cols-1 xl:grid-cols-[340px_1fr]' : 'grid-cols-1'
+        panelUser ? 'grid-cols-1 xl:grid-cols-[340px_1fr]' : 'grid-cols-1'
       }`}>
-        {face.recognizedUser && (
+        {panelUser && (
           <PersonalPanel
-            userId={face.recognizedUser.id}
-            userName={face.recognizedUser.name}
-            userColor={face.recognizedUser.color}
+            userId={panelUser.id}
+            userName={panelUser.name}
+            userColor={panelUser.color}
           />
         )}
 
@@ -256,6 +338,8 @@ export default function Wall() {
           )}
         </div>
       </div>
+        );
+      })()}
 
       {/* Modals */}
       <WallPantryEntry open={showPantryEntry} onClose={() => setShowPantryEntry(false)} />

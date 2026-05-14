@@ -1,6 +1,9 @@
 import { useState, useRef } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { X, GripVertical, Eye, EyeOff, RotateCcw } from 'lucide-react';
 import { type WallCardConfig, type WallConfigShape, CARD_META, DEFAULT_CONFIG } from '../../wall/types';
+import { api } from '../../api/client';
+import type { User } from '../../api/types';
 
 interface Props {
   config: WallConfigShape;
@@ -87,6 +90,18 @@ export default function WallConfigEditor({ config, onSave, onClose }: Props) {
   const [showSeconds, setShowSeconds] = useState(config.showSeconds   ?? false);
   const [screensaverMs, setScreensaverMs] = useState(config.screensaverMs ?? DEFAULT_CONFIG.screensaverMs!);
   const [cameraSleepMs, setCameraSleepMs] = useState(config.cameraSleepMs ?? DEFAULT_CONFIG.cameraSleepMs!);
+  const [excludedUserIds, setExcludedUserIds] = useState<string[]>(config.excludedUserIds ?? []);
+
+  const { data: allUsers = [] } = useQuery<User[]>({
+    queryKey: ['users', 'household'],
+    queryFn: () => api.get('/users').then((r) => r.data),
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const toggleUserExcluded = (id: string) =>
+    setExcludedUserIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
+    );
 
   const dragIdx = useRef<number | null>(null);
 
@@ -122,10 +137,11 @@ export default function WallConfigEditor({ config, onSave, onClose }: Props) {
     setShowSeconds(false);
     setScreensaverMs(DEFAULT_CONFIG.screensaverMs!);
     setCameraSleepMs(DEFAULT_CONFIG.cameraSleepMs!);
+    setExcludedUserIds([]);
   };
 
   const save = () =>
-    onSave({ cards, bgColor, showSeconds, screensaverMs, cameraSleepMs });
+    onSave({ cards, bgColor, showSeconds, screensaverMs, cameraSleepMs, excludedUserIds });
 
   // ── Render ──────────────────────────────────────────────────────────────────
 
@@ -261,6 +277,43 @@ export default function WallConfigEditor({ config, onSave, onClose }: Props) {
               />
             </div>
           </div>
+
+          {/* ── Wand-User ── */}
+          {allUsers.length > 0 && (
+            <div>
+              <SectionLabel>Wand-User</SectionLabel>
+              <p className="text-xs text-gray-500 -mt-1 mb-3">
+                Auswahl, die im User-Switcher (Avatar oben rechts) angezeigt
+                wird. Z.B. Kiosk-Account ausschließen, der kein Profil hat.
+              </p>
+              <ul className="space-y-1.5">
+                {allUsers.map((u) => {
+                  const isIncluded = !excludedUserIds.includes(u.id);
+                  return (
+                    <li
+                      key={u.id}
+                      className="flex items-center gap-3 px-3 py-2.5 rounded-xl bg-gray-800 border border-gray-700"
+                    >
+                      <span
+                        className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-white shrink-0"
+                        style={{ backgroundColor: u.color }}
+                      >
+                        {u.name.charAt(0).toUpperCase()}
+                      </span>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm text-gray-200 truncate">{u.name}</p>
+                        <p className="text-xs text-gray-500 truncate">{u.email}</p>
+                      </div>
+                      <ToggleSwitch
+                        value={isIncluded}
+                        onChange={() => toggleUserExcluded(u.id)}
+                      />
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          )}
 
         </div>
 
