@@ -136,18 +136,39 @@ export default function HAControlsCard({ entities, states, wide }: Props) {
   const qc = useQueryClient();
   const stateMap = new Map(states.map((s) => [s.entity_id, s]));
 
+  // Optimistic Cache-Patch: setzt den State sofort lokal, damit der
+  // User Feedback bekommt. WS-Push korrigiert den echten Wert wenn HA
+  // bestätigt hat. Kein HTTP-Polling-Race mehr.
+  //
+  // setQueriesData matched ALLE Query-Keys mit Prefix ['ha-states'] —
+  // useWallData nutzt einen Key, der von den entityIds abhängt, den wir
+  // hier nicht zwingend exakt rekonstruieren wollen. Prefix-Match ist
+  // robuster.
+  const patchState = (entityId: string, patch: { state?: string; attributes?: Record<string, unknown> }) => {
+    qc.setQueriesData<HAState[]>({ queryKey: ['ha-states'] }, (prev) => {
+      if (!prev) return prev;
+      const idx = prev.findIndex((s) => s.entity_id === entityId);
+      if (idx === -1) return prev;
+      const next = [...prev];
+      next[idx] = {
+        ...next[idx],
+        ...(patch.state !== undefined ? { state: patch.state } : {}),
+        attributes: { ...next[idx].attributes, ...(patch.attributes ?? {}) },
+      };
+      return next;
+    });
+  };
+
   const trigger = useMutation({
     mutationFn: async ({
       domain, service, serviceData,
     }: { domain: string; service: string; serviceData: Record<string, unknown> }) => {
       await callHAService(domain, service, serviceData);
     },
-    onSuccess: () => {
-      // Falls WebSocket gerade nicht durchkommt, holen wir den State nach
-      // einem kurzen Moment via Polling/Query nach.
-      setTimeout(() => qc.invalidateQueries({ queryKey: ['ha-states'] }), 400);
-    },
     onError: (e) => toast.error(e instanceof Error ? e.message : 'HA-Aufruf fehlgeschlagen'),
+    // Kein onSuccess-invalidate! Der WebSocket-Push aus dem Backend setzt
+    // den echten State im Cache. Wenn WS down ist, kommt der State beim
+    // nächsten 60s-Polling.
   });
 
   const handleToggle = (entityId: string) => {
@@ -156,10 +177,19 @@ export default function HAControlsCard({ entities, states, wide }: Props) {
       toast.error('Nicht steuerbar: ' + entityId);
       return;
     }
+    // Optimistic: state sofort flippen. WS-Push korrigiert wenn nötig.
+    const current = stateMap.get(entityId);
+    if (current && (action.service === 'toggle')) {
+      patchState(entityId, { state: current.state === 'on' ? 'off' : 'on' });
+    } else if (current && (action.service === 'turn_on')) {
+      patchState(entityId, { state: 'on' });
+    }
     trigger.mutate({ ...action, serviceData: { entity_id: entityId } });
   };
 
   const handleBrightness = (entityId: string, brightness: number) => {
+    // Optimistic: brightness im Attributes-Patch setzen
+    patchState(entityId, { state: 'on', attributes: { brightness } });
     trigger.mutate({
       domain: 'light',
       service: 'turn_on',
@@ -168,6 +198,7 @@ export default function HAControlsCard({ entities, states, wide }: Props) {
   };
 
   const handleVolume = (entityId: string, volumeLevel: number) => {
+    patchState(entityId, { attributes: { volume_level: volumeLevel } });
     trigger.mutate({
       domain: 'media_player',
       service: 'volume_set',

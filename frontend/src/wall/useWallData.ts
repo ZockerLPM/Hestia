@@ -109,7 +109,10 @@ export function useWallData() {
   // Live-Update-Bridge: Backend pusht state_changed-Events via Socket.io,
   // wir patchen den entsprechenden Eintrag im React-Query-Cache. Wenn der
   // Wand-User mit der eigenen Wand eine Lampe schaltet, kommt der neue
-  // State innerhalb von Millisekunden zurück — keine 30s mehr Lag.
+  // State innerhalb von Millisekunden zurück — kein 60s-Lag mehr.
+  //
+  // setQueriesData mit Prefix-Match, damit auch Caches mit anderen Suffix-
+  // Schlüsseln (z.B. HAControlsCard-Optimistic-Patches) korrigiert werden.
   useEffect(() => {
     if (haEntityIds.length === 0) return;
     const sock = getSocket();
@@ -122,12 +125,10 @@ export function useWallData() {
       last_changed: string;
     }) => {
       if (!interesting.has(payload.entity_id)) return;
-      qc.setQueryData<HAState[]>(haQueryKey, (prev) => {
+      qc.setQueriesData<HAState[]>({ queryKey: ['ha-states'] }, (prev) => {
         if (!prev) return prev;
         const idx = prev.findIndex((s) => s.entity_id === payload.entity_id);
-        if (idx === -1) {
-          return [...prev, payload as HAState];
-        }
+        if (idx === -1) return [...prev, payload as HAState];
         const next = [...prev];
         next[idx] = { ...next[idx], ...payload } as HAState;
         return next;
