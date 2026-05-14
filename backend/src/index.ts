@@ -24,6 +24,7 @@ import externalRoutes from './routes/external';
 import wallRoutes from './routes/wall';
 import moodRoutes from './routes/mood';
 import motionRoutes from './routes/motion';
+import haRoutes from './routes/ha';
 
 export const prisma = new PrismaClient();
 
@@ -58,6 +59,7 @@ app.use('/api/external', externalRoutes);
 app.use('/api/wall', wallRoutes);
 app.use('/api/mood', moodRoutes);
 app.use('/api/internal/motion', motionRoutes);
+app.use('/api/ha', haRoutes);
 
 io.on('connection', (socket) => {
   socket.on('join-household', () => socket.join('household'));

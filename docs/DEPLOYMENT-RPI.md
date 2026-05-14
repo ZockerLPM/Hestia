@@ -1122,6 +1122,83 @@ Im Sammelmodus (Header → "Einkauf eintragen"):
    Räder-Picker zu setzen
 5. "Alle in Vorrat" speichert den ganzen Stapel auf einmal
 
+## Schritt 14b — Home Assistant Integration (optional)
+
+Wenn auf demselben oder einem anderen Gerät im LAN bereits Home Assistant
+läuft, kann Hestia HA-Sensoren auf der Wand anzeigen und Lichter/Heizung/
+Szenen steuern.
+
+### Long-Lived Access Token in HA erzeugen
+
+1. In HA einloggen → Profilbild unten links → **Sicherheit**
+2. Ganz unten **Long-Lived Access Tokens** → **Erstellen**
+3. Name "Hestia", Token kopieren (wird nur einmal angezeigt)
+
+### Token + URL ins Hestia-Backend
+
+```bash
+# In ~/hestia/.env diese zwei Zeilen ergänzen:
+HOMEASSISTANT_URL=http://homeassistant.local:8123
+HOMEASSISTANT_TOKEN=<der-token-aus-ha>
+
+# Backend neu starten — die Variablen werden via docker-compose.prod.yml
+# (Schritt 5) durchgereicht
+docker compose -f docker-compose.prod.yml up -d backend
+
+# Verifizieren — sollte {"configured": true, "ok": true, "version": "..."} liefern
+TOKEN=$(curl -ksS -X POST https://hestia.local/api/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"person1@hestia.local","password":"hestia123"}' \
+  | python3 -c "import sys, json; print(json.load(sys.stdin)['token'])")
+curl -ksS https://hestia.local/api/ha/health -H "Authorization: Bearer $TOKEN"
+```
+
+### Entities auf der Wand auswählen
+
+1. Auf dem Wand-Display: Schieberegler-Icon (`SlidersHorizontal`) im Header
+2. Section **"Smart Home (Home Assistant)"**
+3. Dropdown öffnen, Entity auswählen — Hestia ordnet sie automatisch in
+   die passende Karte (Lichter/Schalter/Szenen → Steuerung, Sensoren →
+   Sensoren-Karte)
+4. Label und Gruppe pro Entity setzen (z.B. Gruppe "Wohnzimmer", damit
+   Sensoren räumlich gebündelt erscheinen)
+5. In der Karten-Sektion oben "Smart Home — Sensoren" und/oder
+   "Smart Home — Steuerung" aktivieren
+6. **Speichern** unten rechts
+
+Polling: alle 30 Sekunden. Das reicht für ein Wand-Display und schont CPU
++ Netzwerk. Echtzeit-Updates über HAs WebSocket-API sind v2.
+
+### Sicherheits-Whitelist
+
+Das Backend erlaubt nur folgende Service-Domains (Whitelist in
+`backend/src/routes/ha.ts`):
+
+`light`, `switch`, `scene`, `script`, `media_player`, `climate`, `cover`,
+`fan`, `vacuum`, `lock`, `input_boolean`, `input_select`, `input_number`
+
+Damit kann ein kompromittierter Wand-User keine `shell_command`s ausführen
+oder System-kritische HA-Services auslösen.
+
+### Troubleshooting
+
+```bash
+# Backend sieht HA nicht? Logs ansehen:
+docker compose -f docker-compose.prod.yml logs backend | grep -i HA
+
+# HA selbst direkt vom Backend-Container aus testen:
+docker compose -f docker-compose.prod.yml exec backend \
+  wget -qO- --header="Authorization: Bearer $HOMEASSISTANT_TOKEN" \
+  $HOMEASSISTANT_URL/api/
+```
+
+Typische Fehler:
+- `ECONNREFUSED` → HA nicht erreichbar. Hostname/Port in `HOMEASSISTANT_URL`
+  prüfen; aus dem Backend-Container muss HA erreichbar sein (kein localhost!)
+- `401 Unauthorized` → Token falsch oder in HA widerrufen
+- `Domain '...' nicht erlaubt` → Service in der Whitelist ergänzen
+
+
 ## Schritt 15 — Automatische Backups
 
 ```bash

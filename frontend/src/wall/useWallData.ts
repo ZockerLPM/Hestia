@@ -5,8 +5,11 @@ import toast from 'react-hot-toast';
 import { api } from '../api/client';
 import type { Task, CalendarEvent, ShoppingItem, MealPlan, PantryItem, ShoppingList, Budget } from '../api/types';
 import { isCountdownEvent } from '../components/wall/cards/CountdownCard';
+import { fetchHAStates, type HAState } from '../api/ha';
 import type { WallConfigShape } from './types';
 import { DEFAULT_CONFIG } from './types';
+
+const HA_REFRESH_MS = 30_000;
 
 const REFRESH_INTERVAL_MS = 60_000;
 
@@ -83,6 +86,18 @@ export function useWallData() {
     queryKey: ['wall-config'],
     queryFn: () => api.get('/wall/config').then((r) => r.data).catch(() => null),
     staleTime: Infinity,
+  });
+
+  // HA-States für alle konfigurierten Entities; bewusst gepollt statt
+  // Socket, weil HAs WebSocket-API ein extra Setup wäre und 30s-Latenz
+  // für Wand-Anzeige völlig ausreicht.
+  const haEntityIds = (wallCfgRaw?.haEntities ?? []).map((e) => e.entityId);
+  const { data: haStates = [] } = useQuery<HAState[]>({
+    queryKey: ['ha-states', haEntityIds.join(',')],
+    queryFn: () => fetchHAStates(haEntityIds),
+    enabled: haEntityIds.length > 0,
+    refetchInterval: HA_REFRESH_MS,
+    staleTime: HA_REFRESH_MS / 2,
   });
 
   // ── Mutations ──────────────────────────────────────────────────────────────
@@ -167,6 +182,7 @@ export function useWallData() {
     budgets,
     countdownEvents: allCountdownEvents,
     wallConfig,
+    haStates,
     // mutations
     toggleTask:     (id: string) => toggleTask.mutate(id),
     addTask:        (title: string) => addTask.mutate(title),

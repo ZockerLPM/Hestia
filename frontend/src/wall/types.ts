@@ -6,7 +6,23 @@ export type WallCardId =
   | 'expiring'
   | 'upcoming-tasks'
   | 'budget'
-  | 'countdown';
+  | 'countdown'
+  | 'ha-sensors'
+  | 'ha-controls';
+
+/** Eine in der Wand sichtbare HA-Entity. */
+export interface HAEntityConfig {
+  /** entity_id aus HA, z.B. "sensor.wohnzimmer_temperatur" oder "light.flur" */
+  entityId: string;
+  /** Anzeigename in der Wand (überschreibt friendly_name aus HA) */
+  label?: string;
+  /** Lucide-Icon-Name als String (z.B. "Thermometer", "Lightbulb") */
+  icon?: string;
+  /** Wo soll sie auftauchen? */
+  card: 'ha-sensors' | 'ha-controls';
+  /** Anzeigegruppe innerhalb der Karte, z.B. "Wohnzimmer" */
+  group?: string;
+}
 
 export interface WallCardConfig {
   id: WallCardId;
@@ -26,6 +42,9 @@ export interface WallConfigShape {
   /** User-IDs, die im manuellen Wand-User-Switcher übersprungen werden
    *  (z.B. ein Kiosk-Account ohne Profil). Default: leer = alle dabei. */
   excludedUserIds?: string[];
+  /** HA-Entities, die auf der Wand sichtbar/steuerbar sein sollen.
+   *  Leer = HA-Karten zeigen "Nichts konfiguriert". */
+  haEntities?: HAEntityConfig[];
 }
 
 export interface WallCardMeta {
@@ -42,6 +61,8 @@ export const CARD_META: Record<WallCardId, WallCardMeta> = {
   'upcoming-tasks': { label: 'Kommende Aufgaben',      emoji: '📋' },
   budget:           { label: 'Budget diesen Monat',    emoji: '💰' },
   countdown:        { label: 'Countdowns',             emoji: '⏱️' },
+  'ha-sensors':     { label: 'Smart Home — Sensoren',  emoji: '🌡️' },
+  'ha-controls':    { label: 'Smart Home — Steuerung', emoji: '💡' },
 };
 
 export const DEFAULT_CARDS: WallCardConfig[] = [
@@ -53,6 +74,8 @@ export const DEFAULT_CARDS: WallCardConfig[] = [
   { id: 'upcoming-tasks', enabled: true,  order: 5 },
   { id: 'budget',         enabled: true,  order: 6 },
   { id: 'countdown',      enabled: true,  order: 7 },
+  { id: 'ha-sensors',     enabled: false, order: 8 },
+  { id: 'ha-controls',    enabled: false, order: 9 },
 ];
 
 export const DEFAULT_CONFIG: WallConfigShape = {

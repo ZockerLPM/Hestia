@@ -15,6 +15,8 @@ services:
       - VAPID_PUBLIC_KEY=${VAPID_PUBLIC_KEY:-}
       - VAPID_PRIVATE_KEY=${VAPID_PRIVATE_KEY:-}
       - VAPID_SUBJECT=${VAPID_SUBJECT:-mailto:hestia@example.com}
+      - HOMEASSISTANT_URL=${HOMEASSISTANT_URL:-}
+      - HOMEASSISTANT_TOKEN=${HOMEASSISTANT_TOKEN:-}
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:3001/api/health"]
       interval: 30s

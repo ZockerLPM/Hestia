@@ -1,9 +1,10 @@
 import { useState, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { X, GripVertical, Eye, EyeOff, RotateCcw } from 'lucide-react';
-import { type WallCardConfig, type WallConfigShape, CARD_META, DEFAULT_CONFIG } from '../../wall/types';
+import { X, GripVertical, Eye, EyeOff, RotateCcw, Plus, Trash2 } from 'lucide-react';
+import { type WallCardConfig, type WallConfigShape, type HAEntityConfig, CARD_META, DEFAULT_CONFIG } from '../../wall/types';
 import { api } from '../../api/client';
 import type { User } from '../../api/types';
+import { fetchHAEntities, fetchHAHealth, type HAEntityDescriptor } from '../../api/ha';
 
 interface Props {
   config: WallConfigShape;
@@ -91,6 +92,7 @@ export default function WallConfigEditor({ config, onSave, onClose }: Props) {
   const [screensaverMs, setScreensaverMs] = useState(config.screensaverMs ?? DEFAULT_CONFIG.screensaverMs!);
   const [cameraSleepMs, setCameraSleepMs] = useState(config.cameraSleepMs ?? DEFAULT_CONFIG.cameraSleepMs!);
   const [excludedUserIds, setExcludedUserIds] = useState<string[]>(config.excludedUserIds ?? []);
+  const [haEntities, setHaEntities] = useState<HAEntityConfig[]>(config.haEntities ?? []);
 
   const { data: allUsers = [] } = useQuery<User[]>({
     queryKey: ['users', 'household'],
@@ -98,10 +100,50 @@ export default function WallConfigEditor({ config, onSave, onClose }: Props) {
     staleTime: 5 * 60 * 1000,
   });
 
+  // HA-Health zeigt sofort, ob die Integration überhaupt konfiguriert ist
+  const { data: haHealth } = useQuery({
+    queryKey: ['ha-health'],
+    queryFn: fetchHAHealth,
+    staleTime: 30 * 1000,
+  });
+
+  // Entity-Auto-Discovery für die Auswahl-Liste; nur fetchen, wenn HA OK ist
+  const { data: haEntitiesAvailable = [] } = useQuery<HAEntityDescriptor[]>({
+    queryKey: ['ha-entities-available'],
+    queryFn: fetchHAEntities,
+    enabled: haHealth?.ok === true,
+    staleTime: 60 * 1000,
+  });
+
   const toggleUserExcluded = (id: string) =>
     setExcludedUserIds((prev) =>
       prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
     );
+
+  const addHaEntity = (descriptor: HAEntityDescriptor) => {
+    if (haEntities.some((e) => e.entityId === descriptor.entityId)) return;
+    // Domain bestimmt sinnvolles Default-Card: Sensoren → Sensoren-Karte,
+    // alles Steuerbare → Controls.
+    const controlDomains = new Set(['light', 'switch', 'scene', 'script', 'fan', 'cover', 'input_boolean']);
+    const card: 'ha-sensors' | 'ha-controls' = controlDomains.has(descriptor.domain)
+      ? 'ha-controls'
+      : 'ha-sensors';
+    setHaEntities((prev) => [
+      ...prev,
+      {
+        entityId: descriptor.entityId,
+        label: descriptor.friendlyName,
+        card,
+        group: '',
+      },
+    ]);
+  };
+
+  const updateHaEntity = (entityId: string, patch: Partial<HAEntityConfig>) =>
+    setHaEntities((prev) => prev.map((e) => (e.entityId === entityId ? { ...e, ...patch } : e)));
+
+  const removeHaEntity = (entityId: string) =>
+    setHaEntities((prev) => prev.filter((e) => e.entityId !== entityId));
 
   const dragIdx = useRef<number | null>(null);
 
@@ -138,10 +180,11 @@ export default function WallConfigEditor({ config, onSave, onClose }: Props) {
     setScreensaverMs(DEFAULT_CONFIG.screensaverMs!);
     setCameraSleepMs(DEFAULT_CONFIG.cameraSleepMs!);
     setExcludedUserIds([]);
+    setHaEntities([]);
   };
 
   const save = () =>
-    onSave({ cards, bgColor, showSeconds, screensaverMs, cameraSleepMs, excludedUserIds });
+    onSave({ cards, bgColor, showSeconds, screensaverMs, cameraSleepMs, excludedUserIds, haEntities });
 
   // ── Render ──────────────────────────────────────────────────────────────────
 
@@ -276,6 +319,114 @@ export default function WallConfigEditor({ config, onSave, onClose }: Props) {
                 onChange={setCameraSleepMs}
               />
             </div>
+          </div>
+
+          {/* ── Smart Home (Home Assistant) ── */}
+          <div>
+            <SectionLabel>Smart Home (Home Assistant)</SectionLabel>
+            {!haHealth?.configured ? (
+              <p className="text-xs text-gray-500">
+                Kein HA-Token im Backend gesetzt. <code className="text-gray-400">HOMEASSISTANT_URL</code>
+                {' und '}
+                <code className="text-gray-400">HOMEASSISTANT_TOKEN</code>
+                {' in der .env eintragen.'}
+              </p>
+            ) : haHealth.ok !== true ? (
+              <p className="text-xs text-red-400">
+                HA nicht erreichbar: {haHealth.error ?? 'unbekannter Fehler'}
+              </p>
+            ) : (
+              <>
+                <p className="text-xs text-gray-500 -mt-1 mb-3">
+                  Entities aus deinem HA auswählen, die auf der Wand erscheinen
+                  sollen. Die <em>Sensoren</em>-Karte zeigt Werte, die <em>Steuerung</em>-Karte
+                  Toggles.
+                </p>
+
+                {/* Konfigurierte Entities */}
+                <ul className="space-y-1.5 mb-3">
+                  {haEntities.map((e) => {
+                    const desc = haEntitiesAvailable.find((d) => d.entityId === e.entityId);
+                    return (
+                      <li
+                        key={e.entityId}
+                        className="px-3 py-2 rounded-xl bg-gray-800 border border-gray-700 space-y-2"
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-gray-500 font-mono truncate flex-1">{e.entityId}</span>
+                          <button
+                            onClick={() => removeHaEntity(e.entityId)}
+                            aria-label="Entfernen"
+                            className="p-1 text-gray-500 hover:text-red-400"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <input
+                            value={e.label ?? ''}
+                            onChange={(ev) => updateHaEntity(e.entityId, { label: ev.target.value })}
+                            placeholder={desc?.friendlyName ?? 'Label'}
+                            className="bg-gray-900 border border-gray-700 rounded px-2 py-1 text-sm text-gray-200"
+                          />
+                          <input
+                            value={e.group ?? ''}
+                            onChange={(ev) => updateHaEntity(e.entityId, { group: ev.target.value })}
+                            placeholder="Gruppe (z.B. Wohnzimmer)"
+                            className="bg-gray-900 border border-gray-700 rounded px-2 py-1 text-sm text-gray-200"
+                          />
+                        </div>
+                        <div className="flex gap-2 text-xs">
+                          <button
+                            onClick={() => updateHaEntity(e.entityId, { card: 'ha-sensors' })}
+                            className={`px-2 py-1 rounded ${e.card === 'ha-sensors' ? 'bg-blue-600 text-white' : 'bg-gray-700 text-gray-400'}`}
+                          >
+                            Sensor
+                          </button>
+                          <button
+                            onClick={() => updateHaEntity(e.entityId, { card: 'ha-controls' })}
+                            className={`px-2 py-1 rounded ${e.card === 'ha-controls' ? 'bg-amber-600 text-white' : 'bg-gray-700 text-gray-400'}`}
+                          >
+                            Steuerung
+                          </button>
+                        </div>
+                      </li>
+                    );
+                  })}
+                  {haEntities.length === 0 && (
+                    <li className="text-xs text-gray-500 italic px-3 py-2">
+                      Noch keine Entity ausgewählt
+                    </li>
+                  )}
+                </ul>
+
+                {/* Add-Dropdown */}
+                <details className="text-sm">
+                  <summary className="cursor-pointer text-gray-400 hover:text-gray-200 inline-flex items-center gap-1.5">
+                    <Plus className="w-4 h-4" /> Entity hinzufügen ({haEntitiesAvailable.length} verfügbar)
+                  </summary>
+                  <select
+                    onChange={(ev) => {
+                      const target = haEntitiesAvailable.find((d) => d.entityId === ev.target.value);
+                      if (target) addHaEntity(target);
+                      ev.target.value = '';
+                    }}
+                    className="mt-2 w-full bg-gray-800 border border-gray-700 text-gray-200 text-sm rounded-lg px-2 py-1.5"
+                    defaultValue=""
+                  >
+                    <option value="" disabled>— Entity auswählen —</option>
+                    {haEntitiesAvailable
+                      .filter((d) => !haEntities.some((e) => e.entityId === d.entityId))
+                      .sort((a, b) => a.entityId.localeCompare(b.entityId))
+                      .map((d) => (
+                        <option key={d.entityId} value={d.entityId}>
+                          {d.friendlyName} ({d.entityId})
+                        </option>
+                      ))}
+                  </select>
+                </details>
+              </>
+            )}
           </div>
 
           {/* ── Wand-User ── */}

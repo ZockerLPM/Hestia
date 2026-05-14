@@ -24,6 +24,8 @@ import ExpiringCard from '../components/wall/cards/ExpiringCard';
 import UpcomingTasksCard from '../components/wall/cards/UpcomingTasksCard';
 import BudgetCard from '../components/wall/cards/BudgetCard';
 import CountdownCard from '../components/wall/cards/CountdownCard';
+import HASensorsCard from '../components/wall/cards/HASensorsCard';
+import HAControlsCard from '../components/wall/cards/HAControlsCard';
 
 import type { WallCardId } from '../wall/types';
 
@@ -73,6 +75,7 @@ export default function Wall() {
     budgets,
     countdownEvents,
     wallConfig,
+    haStates,
     toggleTask, addTask,
     toggleShopping, addShopping,
     cookMeal,
@@ -184,6 +187,16 @@ export default function Wall() {
         return <BudgetCard key="budget" budgets={budgets} wide={wide} />;
       case 'countdown':
         return <CountdownCard key="countdown" events={countdownEvents} wide={wide} />;
+      case 'ha-sensors': {
+        const sensors = (wallConfig.haEntities ?? []).filter((e) => e.card === 'ha-sensors');
+        if (sensors.length === 0) return null;
+        return <HASensorsCard key="ha-sensors" entities={sensors} states={haStates} wide={wide} />;
+      }
+      case 'ha-controls': {
+        const controls = (wallConfig.haEntities ?? []).filter((e) => e.card === 'ha-controls');
+        if (controls.length === 0) return null;
+        return <HAControlsCard key="ha-controls" entities={controls} states={haStates} wide={wide} />;
+      }
       default:
         return null;
     }
