@@ -7,7 +7,7 @@ import type { Task, CalendarEvent, ShoppingItem, MealPlan, PantryItem, ShoppingL
 import { isCountdownEvent } from '../components/wall/cards/CountdownCard';
 import { fetchHAStates, type HAState } from '../api/ha';
 import type { WallConfigShape } from './types';
-import { DEFAULT_CONFIG } from './types';
+import { DEFAULT_CONFIG, DEFAULT_CARDS } from './types';
 
 const HA_REFRESH_MS = 30_000;
 
@@ -170,7 +170,21 @@ export function useWallData() {
     .filter((m) => isSameDay(parseISO(m.date), today))
     .sort((a, b) => MEAL_ORDER.indexOf(a.mealType) - MEAL_ORDER.indexOf(b.mealType));
 
-  const wallConfig: WallConfigShape = wallCfgRaw ?? DEFAULT_CONFIG;
+  // Gespeicherte Config + automatisches Mergen neuer Default-Cards.
+  // So bekommt der User nach App-Updates neue Karten-Typen automatisch
+  // in seinem WallConfigEditor angezeigt (default disabled, manuell
+  // aktivieren). Ohne dieses Merge stecken alte Configs in alten Listen.
+  const wallConfig: WallConfigShape = (() => {
+    const raw = wallCfgRaw ?? DEFAULT_CONFIG;
+    const existingIds = new Set(raw.cards.map((c) => c.id));
+    const missing = DEFAULT_CARDS.filter((c) => !existingIds.has(c.id));
+    if (missing.length === 0) return raw;
+    const merged = [
+      ...raw.cards,
+      ...missing.map((c, i) => ({ ...c, order: raw.cards.length + i })),
+    ];
+    return { ...raw, cards: merged };
+  })();
 
   return {
     // data

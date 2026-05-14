@@ -287,6 +287,8 @@ services:
       - VAPID_SUBJECT=${VAPID_SUBJECT}
       - TOMTOM_API_KEY=${TOMTOM_API_KEY:-}
       - MOTION_SECRET=${MOTION_SECRET:-}
+      - HOMEASSISTANT_URL=${HOMEASSISTANT_URL:-}
+      - HOMEASSISTANT_TOKEN=${HOMEASSISTANT_TOKEN:-}
       - NODE_ENV=production
       - TZ=Europe/Berlin
     volumes:
@@ -1140,10 +1142,24 @@ Szenen steuern.
 # In ~/hestia/.env diese zwei Zeilen ergänzen:
 HOMEASSISTANT_URL=http://homeassistant.local:8123
 HOMEASSISTANT_TOKEN=<der-token-aus-ha>
+```
 
-# Backend neu starten — die Variablen werden via docker-compose.prod.yml
-# (Schritt 5) durchgereicht
+In `~/hestia/docker-compose.prod.yml` sicherstellen, dass beim
+`backend:` → `environment:`-Block beide Variablen stehen:
+
+```yaml
+      - HOMEASSISTANT_URL=${HOMEASSISTANT_URL:-}
+      - HOMEASSISTANT_TOKEN=${HOMEASSISTANT_TOKEN:-}
+```
+
+Ohne diese zwei Zeilen wird `.env` zwar von docker-compose **gelesen**,
+aber nicht **in den Container weitergereicht** — Hestia zeigt dann
+"Kein HA-Token im Backend gesetzt", auch wenn die `.env` korrekt ist.
+
+```bash
+# Backend neu starten + verifizieren
 docker compose -f docker-compose.prod.yml up -d backend
+docker compose -f docker-compose.prod.yml exec backend printenv | grep -i HOME
 
 # Verifizieren — sollte {"configured": true, "ok": true, "version": "..."} liefern
 TOKEN=$(curl -ksS -X POST https://hestia.local/api/auth/login \

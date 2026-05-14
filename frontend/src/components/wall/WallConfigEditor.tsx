@@ -36,12 +36,13 @@ function ToggleSwitch({ value, onChange }: { value: boolean; onChange: (v: boole
       role="switch"
       aria-checked={value}
       onClick={() => onChange(!value)}
-      className={`w-12 h-6 rounded-full transition-colors relative shrink-0 ${value ? 'bg-primary-500' : 'bg-gray-700'}`}
+      className={`relative inline-flex items-center w-12 h-7 rounded-full transition-colors shrink-0 p-0.5 ${
+        value ? 'bg-primary-500 justify-end' : 'bg-gray-700 justify-start'
+      }`}
     >
       <span
-        className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${
-          value ? 'translate-x-6' : 'translate-x-0.5'
-        }`}
+        aria-hidden
+        className="block w-6 h-6 bg-white rounded-full shadow transition-transform"
       />
     </button>
   );
