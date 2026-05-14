@@ -1182,8 +1182,18 @@ curl -ksS https://hestia.local/api/ha/health -H "Authorization: Bearer $TOKEN"
    "Smart Home — Steuerung" aktivieren
 6. **Speichern** unten rechts
 
-Polling: alle 30 Sekunden. Das reicht für ein Wand-Display und schont CPU
-+ Netzwerk. Echtzeit-Updates über HAs WebSocket-API sind v2.
+Update-Pfad:
+- **Primär**: HA-WebSocket → Backend → Socket.io → Frontend (Latenz <100ms)
+- **Safety-Net**: Polling alle 60s, falls die WS-Verbindung mal abreißt
+  und der Reconnect noch nicht durch ist
+
+Slider erscheinen automatisch:
+- **Lichter mit Brightness-Support**: 1–100% Slider unter dem Toggle,
+  wenn das Licht an ist und `supported_color_modes` Helligkeit zulässt
+- **Media-Player**: 0–100% Volume-Slider, wenn der Player nicht aus ist
+
+Slider-Werte werden erst beim Loslassen (PointerUp/TouchEnd) an HA
+geschickt, nicht während des Ziehens — schont API + reagiert flüssig.
 
 ### Sicherheits-Whitelist
 

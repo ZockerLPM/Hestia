@@ -6,10 +6,13 @@ import { api } from '../api/client';
 import type { Task, CalendarEvent, ShoppingItem, MealPlan, PantryItem, ShoppingList, Budget } from '../api/types';
 import { isCountdownEvent } from '../components/wall/cards/CountdownCard';
 import { fetchHAStates, type HAState } from '../api/ha';
+import { getSocket } from '../api/socket';
 import type { WallConfigShape } from './types';
 import { DEFAULT_CONFIG, DEFAULT_CARDS } from './types';
 
-const HA_REFRESH_MS = 30_000;
+// Polling-Intervall für HA-States. Nur als Safety-Net — primärer Pfad
+// ist der WebSocket. Daher länger als nötig: 60s.
+const HA_REFRESH_MS = 60_000;
 
 const REFRESH_INTERVAL_MS = 60_000;
 
@@ -88,17 +91,52 @@ export function useWallData() {
     staleTime: Infinity,
   });
 
-  // HA-States für alle konfigurierten Entities; bewusst gepollt statt
-  // Socket, weil HAs WebSocket-API ein extra Setup wäre und 30s-Latenz
-  // für Wand-Anzeige völlig ausreicht.
+  // HA-States für alle konfigurierten Entities. Primärer Update-Pfad ist
+  // der HA-WebSocket im Backend, der via Socket.io `ha-state-changed`-
+  // Events an den 'household'-Room pusht (Effekt darunter). Polling auf
+  // 60s bleibt als Safety-Net, falls die WS-Verbindung mal abreißt und
+  // der Reconnect noch nicht durch ist.
   const haEntityIds = (wallCfgRaw?.haEntities ?? []).map((e) => e.entityId);
+  const haQueryKey = ['ha-states', haEntityIds.join(',')];
   const { data: haStates = [] } = useQuery<HAState[]>({
-    queryKey: ['ha-states', haEntityIds.join(',')],
+    queryKey: haQueryKey,
     queryFn: () => fetchHAStates(haEntityIds),
     enabled: haEntityIds.length > 0,
     refetchInterval: HA_REFRESH_MS,
     staleTime: HA_REFRESH_MS / 2,
   });
+
+  // Live-Update-Bridge: Backend pusht state_changed-Events via Socket.io,
+  // wir patchen den entsprechenden Eintrag im React-Query-Cache. Wenn der
+  // Wand-User mit der eigenen Wand eine Lampe schaltet, kommt der neue
+  // State innerhalb von Millisekunden zurück — keine 30s mehr Lag.
+  useEffect(() => {
+    if (haEntityIds.length === 0) return;
+    const sock = getSocket();
+    if (!sock) return;
+    const interesting = new Set(haEntityIds);
+    const handle = (payload: {
+      entity_id: string;
+      state: string;
+      attributes: Record<string, unknown>;
+      last_changed: string;
+    }) => {
+      if (!interesting.has(payload.entity_id)) return;
+      qc.setQueryData<HAState[]>(haQueryKey, (prev) => {
+        if (!prev) return prev;
+        const idx = prev.findIndex((s) => s.entity_id === payload.entity_id);
+        if (idx === -1) {
+          return [...prev, payload as HAState];
+        }
+        const next = [...prev];
+        next[idx] = { ...next[idx], ...payload } as HAState;
+        return next;
+      });
+    };
+    sock.on('ha-state-changed', handle);
+    return () => { sock.off('ha-state-changed', handle); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [haEntityIds.join(',')]);
 
   // ── Mutations ──────────────────────────────────────────────────────────────
 

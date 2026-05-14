@@ -142,4 +142,7 @@ httpServer.listen(PORT, async () => {
       .then((n) => n > 0 && console.log(`[startup] Generated ${n} shift(s) from patterns`))
       .catch((err) => console.error('[startup] shift pattern generation failed:', err))
   );
+
+  // HA-WebSocket starten (no-op wenn HA-Env-Vars nicht gesetzt sind)
+  import('./lib/haWebSocket').then(({ connectHA }) => connectHA(io));
 });
